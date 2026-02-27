@@ -114,7 +114,7 @@ def _cam_matrix(rx_deg: float, rz_deg: float) -> np.ndarray:
                    [ 0,           0,          1]])
     return Rx @ Rz
 
-_R_CAM = _cam_matrix(CAMERA_RX, CAMERA_RZ)
+_R_CAM = _cam_matrix(-CAMERA_RX, -CAMERA_RZ)
 
 def project_ldraw(pos_ld: np.ndarray) -> tuple[float, float, float]:
     """Project a LDraw world position to (screen_x, screen_y, depth).
@@ -124,7 +124,7 @@ def project_ldraw(pos_ld: np.ndarray) -> tuple[float, float, float]:
     """
     p_os  = _T @ pos_ld * LDU_TO_MM
     cam   = _R_CAM @ p_os
-    return float(cam[0]), float(-cam[2]), float(-cam[1])
+    return float(cam[0]), float(-cam[1]), float(cam[2])
 
 # ---------------------------------------------------------------------------
 # SCAD file generation
@@ -138,9 +138,7 @@ def make_scad(part: PartDef, r: tuple[int, int, int], rot_ld: np.ndarray) -> str
     via multmatrix so each piece renders in its scene orientation.
     """
     r_str = f"[{r[0]/255:.3f}, {r[1]/255:.3f}, {r[2]/255:.3f}]"
-    # Centre in X and Y; shift down so that top of block is at z=0
-    tx = -part.w_mm / 2
-    ty = -part.l_mm / 2
+    # LEGO.scad block() already centers in X and Y; only shift Z so top is at z=0
     tz = -part.h_mm
     h_param = f"{part.height:.6f}"
     # Convert LDraw rotation → OpenSCAD rotation: R_os = T @ rot_ld @ T
@@ -154,7 +152,7 @@ def make_scad(part: PartDef, r: tuple[int, int, int], rot_ld: np.ndarray) -> str
         f'$fs = 1.0; $fa = 8;\n'
         f'color({r_str})\n'
         f'multmatrix({mat_str})\n'
-        f'translate([{tx}, {ty}, {tz}])\n'
+        f'translate([0, 0, {tz}])\n'
         f'  block(width={part.width}, length={part.length},\n'
         f'        height={h_param}, type="{part.block_type}");\n'
     )

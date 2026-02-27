@@ -1,0 +1,239 @@
+#!/usr/bin/env python3
+"""test_projection.py — Visual regression test for the LDraw→screen projection.
+
+Renders all LDraw pieces at their true 3D world positions in a single OpenSCAD
+scene (the "reference render").  Small coloured spheres are placed at each
+piece's LDraw origin.  Then the *same* origins are projected with our
+project_ldraw() function and drawn as crosshairs on the reference image.
+
+If the projection is correct the crosshairs sit exactly on the sphere centres.
+
+Usage:
+    uv run python test_projection.py [file.ldr] [out_annotated.png]
+
+Outputs
+    /tmp/ref_scene.png      — clean reference render (ground truth)
+    /tmp/ref_annotated.png  — reference + projected crosshairs overlaid
+"""
+
+import sys
+import subprocess
+import tempfile
+from pathlib import Path
+
+import numpy as np
+from PIL import Image, ImageDraw
+
+# ---------------------------------------------------------------------------
+# pull everything we need from the main script
+# ---------------------------------------------------------------------------
+sys.path.insert(0, str(Path(__file__).parent))
+from ldr2png_svg import (
+    parse_ldr, PART_MAP, ldraw_rgb,
+    _T, LDU_TO_MM, PX_PER_MM,
+    CAMERA_RX, CAMERA_RZ, CAMERA_D, IMG_PX,
+    LEGOLIB,
+    project_ldraw,
+)
+
+# ---------------------------------------------------------------------------
+# reference-scene SCAD builder
+# ---------------------------------------------------------------------------
+MARKER_COLORS_SCAD = [
+    "[1,0,0]", "[0,1,0]", "[0,0,1]",
+    "[1,1,0]", "[1,0,1]", "[0,1,1]",
+]
+MARKER_COLORS_PIL = [
+    "red", "lime", "blue",
+    "yellow", "magenta", "cyan",
+]
+MARKER_R_MM = 2.5   # sphere radius for origin markers
+
+
+def build_reference_scad(pieces: list) -> str:
+    """Return a SCAD string that places every known piece at its world position
+    plus a small coloured sphere at each piece's LDraw origin."""
+    lines = [f"use <{LEGOLIB}>", "$fs = 1.0; $fa = 8;", ""]
+
+    for i, piece in enumerate(pieces):
+        part = PART_MAP.get(piece.part)
+        if part is None:
+            continue
+
+        r, g, b = ldraw_rgb(piece.color)
+        piece_color = f"[{r/255:.3f},{g/255:.3f},{b/255:.3f}]"
+
+        pos_os = _T @ piece.pos * LDU_TO_MM          # world position in OS mm
+        R_os   = _T @ piece.rot @ _T                 # rotation in OS frame
+
+        def fmt_row(row):
+            return f"[{row[0]:.6f},{row[1]:.6f},{row[2]:.6f},0]"
+        mat = (f"[{fmt_row(R_os[0])},{fmt_row(R_os[1])},"
+               f"{fmt_row(R_os[2])},[0,0,0,1]]")
+
+        px, py, pz = pos_os
+        h = part.h_mm
+
+        # Piece body at world position
+        lines += [
+            f"// [{i}] {piece.part}  ld={piece.pos.astype(int).tolist()}",
+            f"color({piece_color})",
+            f"translate([{px:.4f},{py:.4f},{pz:.4f}])",
+            f"  multmatrix({mat})",
+            f"  translate([0,0,{-h:.4f}])",
+            f"  block(width={part.width},length={part.length},",
+            f"        height={part.height:.6f},type=\"{part.block_type}\");",
+            "",
+        ]
+
+        # Marker sphere at the LDraw origin (= piece top-centre in OS)
+        mc = MARKER_COLORS_SCAD[i % len(MARKER_COLORS_SCAD)]
+        lines += [
+            f"color({mc})",
+            f"translate([{px:.4f},{py:.4f},{pz:.4f}])",
+            f"  sphere(r={MARKER_R_MM},$fn=16);",
+            "",
+        ]
+
+    return "\n".join(lines)
+
+
+def render_scad_to_png(scad_src: str, png_out: Path) -> bool:
+    with tempfile.NamedTemporaryFile(suffix=".scad", mode="w", delete=False) as f:
+        f.write(scad_src)
+        scad_path = Path(f.name)
+    try:
+        cam = f"0,0,0,{CAMERA_RX},0,{CAMERA_RZ},{CAMERA_D}"
+        result = subprocess.run(
+            ["openscad",
+             "--camera", cam,
+             "--projection", "ortho",
+             "--imgsize", f"{IMG_PX},{IMG_PX}",
+             "-o", str(png_out),
+             str(scad_path)],
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode != 0:
+            print(f"OpenSCAD error:\n{result.stderr[-600:]}", file=sys.stderr)
+            return False
+        return png_out.exists()
+    finally:
+        scad_path.unlink(missing_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# annotation: draw crosshairs at projected positions
+# ---------------------------------------------------------------------------
+def annotate(ref_png: Path, pieces: list, out_png: Path) -> None:
+    img  = Image.open(ref_png).convert("RGBA")
+    draw = ImageDraw.Draw(img)
+
+    cx = cy = IMG_PX / 2   # canvas centre = OS origin
+
+    for i, piece in enumerate(pieces):
+        if piece.part not in PART_MAP:
+            continue
+
+        sx, sy, _ = project_ldraw(piece.pos)
+        px = cx + sx * PX_PER_MM
+        py = cy + sy * PX_PER_MM
+
+        col = MARKER_COLORS_PIL[i % len(MARKER_COLORS_PIL)]
+        R   = 10
+
+        # Crosshair
+        draw.line([(px - R*2, py), (px + R*2, py)], fill=col, width=2)
+        draw.line([(px, py - R*2), (px, py + R*2)], fill=col, width=2)
+        # Circle
+        draw.ellipse([(px - R, py - R), (px + R, py + R)], outline=col, width=2)
+
+    img.save(out_png)
+
+
+# ---------------------------------------------------------------------------
+# sphere-centroid measurement (ground truth from reference render)
+# ---------------------------------------------------------------------------
+# Color ranges used to isolate each sphere in the rendered image.
+# Keys must match MARKER_COLORS_PIL order.
+_COLOR_RANGES = {
+    "red":     ((160, 255), (  0,  80), (  0,  80)),
+    "lime":    ((  0,  80), (160, 255), (  0,  80)),
+    "blue":    ((  0,  80), (  0,  80), (160, 255)),
+    "yellow":  ((160, 255), (160, 255), (  0,  80)),
+    "magenta": ((160, 255), (  0,  80), (160, 255)),
+    "cyan":    ((  0,  80), (160, 255), (160, 255)),
+}
+
+
+def measure_sphere_centroids(ref_png: Path) -> dict[str, tuple[float, float]]:
+    """Return {color_name: (canvas_x, canvas_y)} for each colored sphere."""
+    arr = np.array(Image.open(ref_png).convert("RGB"))
+    result = {}
+    for name, (rr, gr, br) in _COLOR_RANGES.items():
+        mask = (
+            (arr[:, :, 0] >= rr[0]) & (arr[:, :, 0] <= rr[1]) &
+            (arr[:, :, 1] >= gr[0]) & (arr[:, :, 1] <= gr[1]) &
+            (arr[:, :, 2] >= br[0]) & (arr[:, :, 2] <= br[1])
+        )
+        ys, xs = np.where(mask)
+        if len(xs) >= 5:   # ignore stray pixels
+            result[name] = (float(xs.mean()), float(ys.mean()))
+    return result
+
+
+# ---------------------------------------------------------------------------
+# main
+# ---------------------------------------------------------------------------
+def main() -> None:
+    ldr_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("test.ldr")
+    ref_png  = Path("/tmp/ref_scene.png")
+    ann_png  = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("/tmp/ref_annotated.png")
+
+    pieces = parse_ldr(ldr_path)
+    known  = [p for p in pieces if p.part in PART_MAP]
+    print(f"{ldr_path}: {len(known)} known pieces")
+
+    print("Building reference SCAD …")
+    scad = build_reference_scad(pieces)
+
+    print("Rendering reference PNG …")
+    ok = render_scad_to_png(scad, ref_png)
+    if not ok:
+        sys.exit(1)
+    print(f"  → {ref_png}")
+
+    print("Annotating with projected crosshairs …")
+    annotate(ref_png, pieces, ann_png)
+    print(f"  → {ann_png}")
+    print()
+    print("Crosshair colour = sphere colour for each piece.")
+    print("If projection is correct, every crosshair sits on its sphere centre.")
+    print()
+
+    # Measure actual sphere positions from the reference render
+    print("Measuring sphere centroids from reference render …")
+    measured = measure_sphere_centroids(ref_png)
+
+    cx = cy = IMG_PX / 2
+    print()
+    print(f"{'part':8s}  {'color':8s}  {'measured px':>16s}  {'projected px':>16s}  {'error px':>12s}")
+    print("-" * 72)
+    for i, p in enumerate(known):
+        sx, sy, depth = project_ldraw(p.pos)
+        proj_x = cx + sx * PX_PER_MM
+        proj_y = cy + sy * PX_PER_MM
+        col = MARKER_COLORS_PIL[i % len(MARKER_COLORS_PIL)]
+        meas = measured.get(col)
+        if meas:
+            ex, ey = proj_x - meas[0], proj_y - meas[1]
+            meas_str  = f"({meas[0]:6.1f},{meas[1]:6.1f})"
+            err_str   = f"({ex:+6.1f},{ey:+6.1f})"
+        else:
+            meas_str  = "       n/a      "
+            err_str   = "      n/a     "
+        proj_str = f"({proj_x:6.1f},{proj_y:6.1f})"
+        print(f"{p.part:8s}  {col:8s}  {meas_str:>16s}  {proj_str:>16s}  {err_str:>14s}")
+
+
+if __name__ == "__main__":
+    main()
