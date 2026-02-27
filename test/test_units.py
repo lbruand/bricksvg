@@ -10,7 +10,7 @@ from unittest.mock import patch, MagicMock
 from ldr2svg.ldr2png_svg import (
     parse_ldr, _parse_ldr_line, project_ldraw, ldraw_rgb, PART_MAP,
     _project_piece, _project_pieces, _canvas_bounds, _build_defs, _inject_def_comments,
-    _piece_label, build_pngs,
+    _piece_label, _render_one, build_pngs,
 )
 
 LDR_PATH = Path(__file__).parent.parent / "test.ldr"
@@ -254,6 +254,49 @@ _FAKE_RENDER = (True, (_FAKE_IMG, 50.0, 40.0))   # render_piece → True, remove
 
 def _fake_remove_and_crop(_path):
     return _FAKE_IMG, 50.0, 40.0
+
+
+class TestRenderOne:
+    def _piece(self):
+        from ldr2svg.ldr2png_svg import Piece
+        return Piece(part="3666", color=4, pos=np.zeros(3), rot=np.eye(3))
+
+    def test_success_returns_img_and_anchors(self, tmp_path):
+        piece = self._piece()
+        with patch("ldr2svg.ldr2png_svg.render_piece", return_value=True), \
+             patch("ldr2svg.ldr2png_svg.remove_and_crop", side_effect=_fake_remove_and_crop):
+            result = _render_one(0, piece, 1, tmp_path, keep_pngs=False)
+        assert result is not None
+        img, ax, ay = result
+        assert img is _FAKE_IMG
+        assert ax == pytest.approx(50.0)
+        assert ay == pytest.approx(40.0)
+
+    def test_failed_render_returns_none(self, tmp_path):
+        piece = self._piece()
+        with patch("ldr2svg.ldr2png_svg.render_piece", return_value=False):
+            result = _render_one(0, piece, 1, tmp_path, keep_pngs=False)
+        assert result is None
+
+    def test_keep_pngs_false_deletes_file(self, tmp_path):
+        piece = self._piece()
+        def fake_render(scad_src, png_path):
+            png_path.write_bytes(b"")
+            return True
+        with patch("ldr2svg.ldr2png_svg.render_piece", side_effect=fake_render), \
+             patch("ldr2svg.ldr2png_svg.remove_and_crop", side_effect=_fake_remove_and_crop):
+            _render_one(0, piece, 1, tmp_path, keep_pngs=False)
+        assert list(tmp_path.glob("*.png")) == []
+
+    def test_keep_pngs_true_retains_file(self, tmp_path):
+        piece = self._piece()
+        def fake_render(scad_src, png_path):
+            png_path.write_bytes(b"")
+            return True
+        with patch("ldr2svg.ldr2png_svg.render_piece", side_effect=fake_render), \
+             patch("ldr2svg.ldr2png_svg.remove_and_crop", side_effect=_fake_remove_and_crop):
+            _render_one(0, piece, 1, tmp_path, keep_pngs=True)
+        assert len(list(tmp_path.glob("*.png"))) == 1
 
 
 class TestBuildPngs:

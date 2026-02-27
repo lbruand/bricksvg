@@ -370,6 +370,30 @@ def compose_svg(
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+def _render_one(
+    i: int,
+    piece: Piece,
+    n: int,
+    tmpdir: Path,
+    keep_pngs: bool,
+) -> tuple[Image.Image, float, float] | None:
+    """Render a single piece; return (img, ax, ay) or None on failure."""
+    part = PART_MAP[piece.part]
+    r, g, b = ldraw_rgb(piece.color)
+    scad_src = make_scad(part, (r, g, b), piece.rot)
+    png_path = tmpdir / f"piece_{i:03d}_{piece.part}.png"
+    print(f"  [{i+1}/{n}] Rendering {piece.part} (color {piece.color}) …", end=" ", flush=True)
+    ok = render_piece(scad_src, png_path)
+    if ok:
+        img, ax, ay = remove_and_crop(png_path)
+        print("ok")
+        if not keep_pngs:
+            png_path.unlink(missing_ok=True)
+        return img, ax, ay
+    print("FAILED — skipping")
+    return None
+
+
 def build_pngs(
     pieces: list[Piece],
     tmpdir: Path,
@@ -380,39 +404,34 @@ def build_pngs(
     renders maps label → (img, ax, ay) for each unique (part, color, rotation).
     pngs stores (piece, iw, ih, ax, ay) — image dimensions rather than the image itself.
     """
-    pngs: list[tuple[Piece, int, int, float, float]] = []
-    renders: dict[str, tuple[Image.Image, float, float]] = {}
+    n = len(pieces)
 
     for i, piece in enumerate(pieces):
-        part = PART_MAP.get(piece.part)
-        if part is None:
-            print(f"  [{i+1}/{len(pieces)}] Skipping unknown part: {piece.part}")
-        else:
-            label = _piece_label(piece)
-            if label in renders:
-                img, anchor_x, anchor_y = renders[label]
-                iw, ih = img.size
-                pngs.append((piece, iw, ih, anchor_x, anchor_y))
-                print(f"  [{i+1}/{len(pieces)}] Rendering {piece.part} (color {piece.color}) … cached")
-            else:
-                r, g, b = ldraw_rgb(piece.color)
-                scad_src = make_scad(part, (r, g, b), piece.rot)
-                png_path = tmpdir / f"piece_{i:03d}_{piece.part}.png"
+        if PART_MAP.get(piece.part) is None:
+            print(f"  [{i+1}/{n}] Skipping unknown part: {piece.part}")
 
-                print(f"  [{i+1}/{len(pieces)}] Rendering {piece.part} (color {piece.color}) …",
-                      end=" ", flush=True)
-                ok = render_piece(scad_src, png_path)
-                if ok:
-                    img, anchor_x, anchor_y = remove_and_crop(png_path)
-                    iw, ih = img.size
-                    renders[label] = (img, anchor_x, anchor_y)
-                    pngs.append((piece, iw, ih, anchor_x, anchor_y))
-                    print("ok")
-                    if not keep_pngs:
-                        png_path.unlink(missing_ok=True)
-                else:
-                    print("FAILED — skipping")
+    # First occurrence of each known label (reversed so first index wins)
+    by_label: dict[str, tuple[int, Piece]] = {
+        _piece_label(piece): (i, piece)
+        for i, piece in reversed(list(enumerate(pieces)))
+        if PART_MAP.get(piece.part) is not None
+    }
 
+    # Render each unique label once
+    renders: dict[str, tuple[Image.Image, float, float]] = {
+        label: result
+        for label, (i, piece) in by_label.items()
+        if (result := _render_one(i, piece, n, tmpdir, keep_pngs)) is not None
+    }
+
+    # Build the full pngs list preserving original piece order
+    pngs: list[tuple[Piece, int, int, float, float]] = [
+        (piece, *img.size, ax, ay)
+        for piece in pieces
+        if PART_MAP.get(piece.part) is not None
+        and (label := _piece_label(piece)) in renders
+        for img, ax, ay in [renders[label]]
+    ]
     return pngs, renders
 
 
