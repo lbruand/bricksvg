@@ -306,7 +306,6 @@ def compose_svg(
 
     # Define each unique image once in <defs>; pieces with the same label share one blob.
     defs: dict[str, tuple[str, float, float]] = {}  # label → (def_id, anchor_x, anchor_y)
-    defs_labels: list[str] = []
     for _, _, _, _, img, anchor_x, anchor_y, iw, ih, label in projected:
         if label not in defs:
             part_name = label.split()[0]
@@ -323,7 +322,6 @@ def compose_svg(
                 id=def_id,
             ))
             defs[label] = (def_id, anchor_x, anchor_y)
-            defs_labels.append(label)
 
     # Place <use> elements in painter's order (no per-use comments)
     for depth, ldy, sx_px, sy_px, img, anchor_x, anchor_y, iw, ih, label in projected:
@@ -337,7 +335,7 @@ def compose_svg(
     # Inject <!-- label --> comments before each <image in <defs>
     import re
     svg_text = Path(output).read_text()
-    it = iter(defs_labels)
+    it = iter(defs.keys())
     svg_text = re.sub(r"(<image\b)", lambda m: f"<!-- {next(it)} -->\n      {m.group(1)}", svg_text)
     Path(output).write_text(svg_text)
 
