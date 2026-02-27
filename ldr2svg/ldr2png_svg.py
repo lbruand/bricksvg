@@ -244,13 +244,12 @@ def parse_ldr(path: Path) -> list[Piece]:
     pieces = []
     for line in path.read_text(errors="replace").splitlines():
         parts = line.split()
-        if not parts or parts[0] != "1" or len(parts) < 15:
-            continue
-        color = int(parts[1])
-        pos   = np.array([float(p) for p in parts[2:5]])
-        rot   = np.array([float(p) for p in parts[5:14]], dtype=float).reshape(3, 3)
-        name  = Path(" ".join(parts[14:])).stem.lower()
-        pieces.append(Piece(part=name, color=color, pos=pos, rot=rot))
+        if parts and parts[0] == "1" and len(parts) >= 15:
+            color = int(parts[1])
+            pos   = np.array([float(p) for p in parts[2:5]])
+            rot   = np.array([float(p) for p in parts[5:14]], dtype=float).reshape(3, 3)
+            name  = Path(" ".join(parts[14:])).stem.lower()
+            pieces.append(Piece(part=name, color=color, pos=pos, rot=rot))
     return pieces
 
 # ---------------------------------------------------------------------------
@@ -374,33 +373,29 @@ def main() -> None:
         part = PART_MAP.get(piece.part)
         if part is None:
             print(f"  [{i+1}/{len(pieces)}] Skipping unknown part: {piece.part}")
-            continue
+        else:
+            cache_key = (piece.part, piece.color, piece.rot.tobytes())
+            if cache_key in render_cache:
+                img, anchor_x, anchor_y = render_cache[cache_key]
+                pngs.append((piece, img, anchor_x, anchor_y))
+                print(f"  [{i+1}/{len(pieces)}] Rendering {piece.part} (color {piece.color}) … cached")
+            else:
+                r, g, b = ldraw_rgb(piece.color)
+                scad_src = make_scad(part, (r, g, b), piece.rot)
+                png_path = tmpdir / f"piece_{i:03d}_{piece.part}.png"
 
-        cache_key = (piece.part, piece.color, piece.rot.tobytes())
-        if cache_key in render_cache:
-            img, anchor_x, anchor_y = render_cache[cache_key]
-            pngs.append((piece, img, anchor_x, anchor_y))
-            print(f"  [{i+1}/{len(pieces)}] Rendering {piece.part} (color {piece.color}) … cached")
-            continue
-
-        r, g, b = ldraw_rgb(piece.color)
-        scad_src = make_scad(part, (r, g, b), piece.rot)
-        png_path = tmpdir / f"piece_{i:03d}_{piece.part}.png"
-
-        print(f"  [{i+1}/{len(pieces)}] Rendering {piece.part} (color {piece.color}) …",
-              end=" ", flush=True)
-        ok = render_piece(scad_src, png_path)
-        if not ok:
-            print("FAILED — skipping")
-            continue
-
-        img, anchor_x, anchor_y = remove_and_crop(png_path)
-        render_cache[cache_key] = (img, anchor_x, anchor_y)
-        pngs.append((piece, img, anchor_x, anchor_y))
-        print("ok")
-
-        if not args.keep_pngs:
-            png_path.unlink(missing_ok=True)
+                print(f"  [{i+1}/{len(pieces)}] Rendering {piece.part} (color {piece.color}) …",
+                      end=" ", flush=True)
+                ok = render_piece(scad_src, png_path)
+                if ok:
+                    img, anchor_x, anchor_y = remove_and_crop(png_path)
+                    render_cache[cache_key] = (img, anchor_x, anchor_y)
+                    pngs.append((piece, img, anchor_x, anchor_y))
+                    print("ok")
+                    if not args.keep_pngs:
+                        png_path.unlink(missing_ok=True)
+                else:
+                    print("FAILED — skipping")
 
     if not pngs:
         print("No pieces rendered — nothing to compose.", file=sys.stderr)
