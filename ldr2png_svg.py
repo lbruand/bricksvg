@@ -268,14 +268,15 @@ def compose_svg(
         sx, sy, depth = project_ldraw(piece.pos)
         sx_px  = sx * PX_PER_MM
         sy_px  = sy * PX_PER_MM
+        ldy    = float(piece.pos[1])   # LDraw Y: more negative = higher in scene
         iw, ih = img.size
-        projected.append((depth, sx_px, sy_px, img, anchor_x, anchor_y, iw, ih, piece.part))
+        projected.append((depth, ldy, sx_px, sy_px, img, anchor_x, anchor_y, iw, ih, piece.part))
 
     # Canvas bounding box: each image placed so anchor aligns with projected pos
-    xs = ([sx - ax       for _, sx, sy, img, ax, ay, iw, ih, _ in projected] +
-          [sx - ax + iw  for _, sx, sy, img, ax, ay, iw, ih, _ in projected])
-    ys = ([sy - ay       for _, sx, sy, img, ax, ay, iw, ih, _ in projected] +
-          [sy - ay + ih  for _, sx, sy, img, ax, ay, iw, ih, _ in projected])
+    xs = ([sx - ax       for _, _, sx, sy, img, ax, ay, iw, ih, _ in projected] +
+          [sx - ax + iw  for _, _, sx, sy, img, ax, ay, iw, ih, _ in projected])
+    ys = ([sy - ay       for _, _, sx, sy, img, ax, ay, iw, ih, _ in projected] +
+          [sy - ay + ih  for _, _, sx, sy, img, ax, ay, iw, ih, _ in projected])
     min_x, max_x = min(xs), max(xs)
     min_y, max_y = min(ys), max(ys)
     W = int(max_x - min_x + 2 * padding)
@@ -284,14 +285,15 @@ def compose_svg(
     def cx(x): return x - min_x + padding
     def cy(y): return y - min_y + padding
 
-    # Sort back-to-front
-    projected.sort(key=lambda t: t[0])
+    # Sort back-to-front: primary = LDraw Y descending (lower pieces first, elevated last),
+    # secondary = cam depth ascending (farther first) for same-height pieces.
+    projected.sort(key=lambda t: (-t[1], t[0]))
 
     dwg = svgwrite.Drawing(output, size=(f"{W}px", f"{H}px"))
     dwg.add(dwg.rect((0, 0), ("100%", "100%"), fill="#f8f8f0"))
 
     parts_in_order = []
-    for depth, sx_px, sy_px, img, anchor_x, anchor_y, iw, ih, part in projected:
+    for depth, ldy, sx_px, sy_px, img, anchor_x, anchor_y, iw, ih, part in projected:
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         b64 = base64.b64encode(buf.getvalue()).decode()
