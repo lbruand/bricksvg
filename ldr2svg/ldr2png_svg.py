@@ -310,27 +310,32 @@ def _canvas_bounds(
     return W, H, min_x, min_y
 
 
+def _make_dwg_image(
+    label: str, img: Image.Image, anchor_x: float, anchor_y: float, dwg: svgwrite.Drawing,
+) -> tuple[str, float, float, svgwrite.image.Image]:
+    """Encode img as a base64 PNG and return (def_id, ax, ay, dwg_image)."""
+    part_name  = label.split()[0]
+    def_id     = f"{part_name}-{hashlib.sha256(label.encode()).hexdigest()[:8]}"
+    iw, ih     = img.size
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    uri = f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode()}"
+    return def_id, anchor_x, anchor_y, dwg.image(uri, insert=("0px", "0px"),
+                                                  size=(f"{iw}px", f"{ih}px"), id=def_id)
+
+
 def _build_defs(
     dwg: svgwrite.Drawing,
     renders: dict[str, tuple["Image.Image", float, float, list]],
 ) -> dict[str, tuple[str, float, float]]:
     """Add each unique piece image to <defs> once; return label→(def_id, ax, ay)."""
-    defs: dict[str, tuple[str, float, float, svgwrite.image.Image]] = {}
-    for label, (img, anchor_x, anchor_y, _pieces) in renders.items():
-        part_name  = label.split()[0]
-        short_hash = hashlib.sha256(label.encode()).hexdigest()[:8]
-        def_id     = f"{part_name}-{short_hash}"
-        iw, ih     = img.size
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        b64 = base64.b64encode(buf.getvalue()).decode()
-        uri = f"data:image/png;base64,{b64}"
-        dwg_image:svgwrite.image.Image = dwg.image(uri, insert=("0px", "0px"), size=(f"{iw}px", f"{ih}px"), id=def_id, )
-        defs[label] = (def_id, anchor_x, anchor_y, dwg_image)
-
+    defs: dict[str, tuple[str, float, float, svgwrite.image.Image]] = {
+        label: _make_dwg_image(label, img, anchor_x, anchor_y, dwg)
+        for label, (img, anchor_x, anchor_y, _pieces) in renders.items()
+    }
     for k, (_, _, _, dwg_image) in defs.items():
         dwg.defs.add(dwg_image)
-    return {k:(def_id, anchor_x, anchor_y) for k, (def_id, anchor_x, anchor_y, _) in defs.items()}
+    return {k: (def_id, ax, ay) for k, (def_id, ax, ay, _) in defs.items()}
 
 
 def _inject_def_comments(output: str, defs: dict[str, tuple]) -> None:
