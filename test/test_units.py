@@ -119,13 +119,12 @@ def _make_pngs():
 
 def _make_renders():
     """Unique renders dict from test.ldr with synthetic images (3 entries)."""
-    renders: dict = {}
-    for p in parse_ldr(LDR_PATH):
-        if p.part in PART_MAP:
-            label = _piece_label(p)
-            if label not in renders:
-                renders[label] = (Image.new("RGBA", (100, 80)), 50.0, 40.0)
-    return renders
+    pieces = [p for p in parse_ldr(LDR_PATH) if p.part in PART_MAP]
+    return {
+        label: (Image.new("RGBA", (100, 80)), 50.0, 40.0,
+                [p for p in pieces if _piece_label(p) == label])
+        for label in dict.fromkeys(_piece_label(p) for p in pieces)
+    }
 
 
 def _projected_row(sx=0.0, sy=0.0, ax=0.0, ay=0.0, iw=100, ih=80, label="test"):
@@ -303,48 +302,44 @@ class TestBuildPngs:
     def _run(self, pieces, tmp_path, keep_pngs=False):
         with patch("ldr2svg.ldr2png_svg.render_piece", return_value=True), \
              patch("ldr2svg.ldr2png_svg.remove_and_crop", side_effect=_fake_remove_and_crop):
-            pngs, _renders = build_pngs(pieces, tmp_path, keep_pngs=keep_pngs)
-            return pngs
+            return build_pngs(pieces, tmp_path, keep_pngs=keep_pngs)
 
-    def test_known_parts_returned(self, tmp_path):
+    def test_known_parts_rendered(self, tmp_path):
         pieces = [p for p in parse_ldr(LDR_PATH) if p.part in PART_MAP]
-        result = self._run(pieces, tmp_path)
-        assert len(result) == len(pieces)
+        renders = self._run(pieces, tmp_path)
+        assert len(renders) == 3   # 3666, 60474, 3062a
 
     def test_unknown_part_skipped(self, tmp_path):
-        pieces = parse_ldr(LDR_PATH)
-        # All parts in test.ldr are known, so inject one unknown
         from ldr2svg.ldr2png_svg import Piece
         unknown = Piece(part="unknown_part_xyz", color=1,
                         pos=np.zeros(3), rot=np.eye(3))
-        result = self._run([unknown], tmp_path)
-        assert result == []
+        renders = self._run([unknown], tmp_path)
+        assert renders == {}
 
     def test_identical_pieces_cached(self, tmp_path):
-        """Two identical pieces should only call render_piece once."""
+        """Three identical 3062a pieces → render_piece called once → one renders entry."""
         pieces = [p for p in parse_ldr(LDR_PATH) if p.part == "3062a"]
         assert len(pieces) == 3
         with patch("ldr2svg.ldr2png_svg.render_piece", return_value=True) as mock_render, \
              patch("ldr2svg.ldr2png_svg.remove_and_crop", side_effect=_fake_remove_and_crop):
-            pngs, renders = build_pngs(pieces, tmp_path)
-        assert len(pngs) == 3
-        mock_render.assert_called_once()   # cached after first render
+            renders = build_pngs(pieces, tmp_path)
+        assert len(renders) == 1
+        mock_render.assert_called_once()
 
     def test_renders_has_unique_entries(self, tmp_path):
-        """5-piece scene with 3 unique (part, color, rot) combos → renders has 3 entries."""
+        """5-piece scene with 3 unique (part, color, rot) combos → 3 renders entries."""
         pieces = [p for p in parse_ldr(LDR_PATH) if p.part in PART_MAP]
         with patch("ldr2svg.ldr2png_svg.render_piece", return_value=True), \
              patch("ldr2svg.ldr2png_svg.remove_and_crop", side_effect=_fake_remove_and_crop):
-            pngs, renders = build_pngs(pieces, tmp_path)
-        assert len(pngs) == 5
+            renders = build_pngs(pieces, tmp_path)
         assert len(renders) == 3   # 3666, 60474, 3062a (3 repeated pieces share one entry)
 
     def test_failed_render_skipped(self, tmp_path):
         pieces = [p for p in parse_ldr(LDR_PATH) if p.part in PART_MAP][:1]
         with patch("ldr2svg.ldr2png_svg.render_piece", return_value=False), \
              patch("ldr2svg.ldr2png_svg.remove_and_crop", side_effect=_fake_remove_and_crop):
-            pngs, renders = build_pngs(pieces, tmp_path)
-        assert pngs == []
+            renders = build_pngs(pieces, tmp_path)
+        assert renders == {}
 
     def test_keep_pngs_false_removes_files(self, tmp_path):
         pieces = [p for p in parse_ldr(LDR_PATH) if p.part in PART_MAP][:1]

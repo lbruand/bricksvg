@@ -311,11 +311,11 @@ def _canvas_bounds(
 
 def _build_defs(
     dwg: svgwrite.Drawing,
-    renders: dict[str, tuple["Image.Image", float, float]],
+    renders: dict[str, tuple["Image.Image", float, float, list]],
 ) -> dict[str, tuple[str, float, float]]:
     """Add each unique piece image to <defs> once; return label→(def_id, ax, ay)."""
     defs: dict[str, tuple[str, float, float]] = {}
-    for label, (img, anchor_x, anchor_y) in renders.items():
+    for label, (img, anchor_x, anchor_y, _pieces) in renders.items():
         part_name  = label.split()[0]
         short_hash = hashlib.sha256(label.encode()).hexdigest()[:8]
         def_id     = f"{part_name}-{short_hash}"
@@ -343,11 +343,15 @@ def _inject_def_comments(output: str, defs: dict[str, tuple]) -> None:
 
 
 def compose_svg(
-    pngs: list[tuple[Piece, int, int, float, float]],
-    renders: dict[str, tuple[Image.Image, float, float]],
+    renders: dict[str, tuple[Image.Image, float, float, list[Piece]]],
     output: str,
     padding: int = 60,
 ) -> None:
+    pngs: list[tuple[Piece, int, int, float, float]] = [
+        (piece, *img.size, ax, ay)
+        for img, ax, ay, piece_list in renders.values()
+        for piece in piece_list
+    ]
     projected          = _project_pieces(pngs)
     W, H, min_x, min_y = _canvas_bounds(projected, padding)
 
@@ -398,11 +402,11 @@ def build_pngs(
     pieces: list[Piece],
     tmpdir: Path,
     keep_pngs: bool = False,
-) -> tuple[list[tuple[Piece, int, int, float, float]], dict[str, tuple[Image.Image, float, float]]]:
-    """Render each piece to a PNG (with caching); return (pngs, renders).
+) -> dict[str, tuple[Image.Image, float, float, list[Piece]]]:
+    """Render each unique (part, color, rotation) once; return renders.
 
-    renders maps label → (img, ax, ay) for each unique (part, color, rotation).
-    pngs stores (piece, iw, ih, ax, ay) — image dimensions rather than the image itself.
+    renders maps label → (img, ax, ay, pieces) where pieces is the list of
+    all scene pieces sharing that label, in their original order.
     """
     n = len(pieces)
 
@@ -410,29 +414,26 @@ def build_pngs(
         if PART_MAP.get(piece.part) is None:
             print(f"  [{i+1}/{n}] Skipping unknown part: {piece.part}")
 
-    # First occurrence of each known label (reversed so first index wins)
+    known = [(i, p) for i, p in enumerate(pieces) if PART_MAP.get(p.part) is not None]
+    unique_labels = list(dict.fromkeys(_piece_label(p) for _, p in known))
+
+    # First occurrence of each label for rendering (index preserved for PNG filename)
     by_label: dict[str, tuple[int, Piece]] = {
-        _piece_label(piece): (i, piece)
-        for i, piece in reversed(list(enumerate(pieces)))
-        if PART_MAP.get(piece.part) is not None
+        label: next((i, p) for i, p in known if _piece_label(p) == label)
+        for label in unique_labels
+    }
+    # All pieces sharing each label, preserving scene order
+    pieces_by_label: dict[str, list[Piece]] = {
+        label: [p for _, p in known if _piece_label(p) == label]
+        for label in unique_labels
     }
 
-    # Render each unique label once
-    renders: dict[str, tuple[Image.Image, float, float]] = {
-        label: result
+    # Render each unique label once, attach its piece list
+    return {
+        label: (*result, pieces_by_label[label])
         for label, (i, piece) in by_label.items()
         if (result := _render_one(i, piece, n, tmpdir, keep_pngs)) is not None
     }
-
-    # Build the full pngs list preserving original piece order
-    pngs: list[tuple[Piece, int, int, float, float]] = [
-        (piece, *img.size, ax, ay)
-        for piece in pieces
-        if PART_MAP.get(piece.part) is not None
-        and (label := _piece_label(piece)) in renders
-        for img, ax, ay in [renders[label]]
-    ]
-    return pngs, renders
 
 
 def main() -> None:
@@ -454,13 +455,13 @@ def main() -> None:
     tmpdir = Path(tempfile.mkdtemp(prefix="ldr2png_"))
     print(f"Rendering pieces (tmpdir: {tmpdir}) …")
 
-    pngs, renders = build_pngs(pieces, tmpdir, keep_pngs=args.keep_pngs)
+    renders = build_pngs(pieces, tmpdir, keep_pngs=args.keep_pngs)
 
-    if not pngs:
+    if not renders:
         print("No pieces rendered — nothing to compose.", file=sys.stderr)
         return
 
-    compose_svg(pngs, renders, output_path, padding=60)
+    compose_svg(renders, output_path, padding=60)
 
     if not args.keep_pngs:
         tmpdir.rmdir()
