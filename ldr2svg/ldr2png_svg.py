@@ -404,9 +404,10 @@ def _draw_isometric_grid(dwg: svgwrite.Drawing, fy: float,
     zs = range(int(gz0), int(gz1) + 1, GRID_STEP)
     xs = range(int(gx0), int(gx1) + 1, GRID_STEP)
 
-    for line in ([dwg.line(proj(gx0, z), proj(gx1, z), **kw) for z in zs] +
-                 [dwg.line(proj(x, gz0), proj(x, gz1), **kw) for x in xs]):
-        grp.add(line)
+    grp.elements.extend([
+        *[dwg.line(proj(gx0, z), proj(gx1, z), **kw) for z in zs],
+        *[dwg.line(proj(x, gz0), proj(x, gz1), **kw) for x in xs],
+    ])
 
     dwg.add(grp)
 
