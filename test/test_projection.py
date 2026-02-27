@@ -1,19 +1,13 @@
 #!/usr/bin/env python3
-"""test_projection.py — Visual regression test for the LDraw→screen projection.
+"""test_projection.py — Integration test for the LDraw→screen projection.
 
 Renders all LDraw pieces at their true 3D world positions in a single OpenSCAD
 scene (the "reference render").  Small coloured spheres are placed at each
-piece's LDraw origin.  Then the *same* origins are projected with our
-project_ldraw() function and drawn as crosshairs on the reference image.
+piece's LDraw origin.  project_ldraw() is then used to project the same
+origins and the pixel error is asserted to be within tolerance.
 
-If the projection is correct the crosshairs sit exactly on the sphere centres.
-
-Usage:
-    uv run python test_projection.py [file.ldr] [out_annotated.png]
-
-Outputs
-    /tmp/ref_scene.png      — clean reference render (ground truth)
-    /tmp/ref_annotated.png  — reference + projected crosshairs overlaid
+Also usable as a standalone script:
+    uv run python test/test_projection.py [file.ldr] [out_annotated.png]
 """
 
 import sys
@@ -22,12 +16,9 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
+import pytest
 from PIL import Image, ImageDraw
 
-# ---------------------------------------------------------------------------
-# pull everything we need from the main script
-# ---------------------------------------------------------------------------
-sys.path.insert(0, str(Path(__file__).parent.parent))
 from ldr2svg.ldr2png_svg import (
     parse_ldr, PART_MAP, ldraw_rgb,
     _T, LDU_TO_MM, PX_PER_MM,
@@ -49,6 +40,12 @@ MARKER_COLORS_PIL = [
 ]
 MARKER_R_MM = 2.5   # sphere radius for origin markers
 
+LDR_PATH = Path(__file__).parent.parent / "test.ldr"
+
+# Tolerances
+X_TOLERANCE = 10.0   # px — horizontal projection error
+Y_TOLERANCE = 15.0   # px — includes ~8.8 px constant vertical offset
+
 
 def build_reference_scad(pieces: list) -> str:
     """Return a SCAD string that places every known piece at its world position
@@ -63,8 +60,8 @@ def build_reference_scad(pieces: list) -> str:
         r, g, b = ldraw_rgb(piece.color)
         piece_color = f"[{r/255:.3f},{g/255:.3f},{b/255:.3f}]"
 
-        pos_os = _T @ piece.pos * LDU_TO_MM          # world position in OS mm
-        R_os   = _T @ piece.rot @ _T                 # rotation in OS frame
+        pos_os = _T @ piece.pos * LDU_TO_MM
+        R_os   = _T @ piece.rot @ _T
 
         def fmt_row(row):
             return f"[{row[0]:.6f},{row[1]:.6f},{row[2]:.6f},0]"
@@ -74,7 +71,6 @@ def build_reference_scad(pieces: list) -> str:
         px, py, pz = pos_os
         h = part.h_mm
 
-        # Piece body at world position
         lines += [
             f"// [{i}] {piece.part}  ld={piece.pos.astype(int).tolist()}",
             f"color({piece_color})",
@@ -86,7 +82,6 @@ def build_reference_scad(pieces: list) -> str:
             "",
         ]
 
-        # Marker sphere at the LDraw origin (= piece top-centre in OS)
         mc = MARKER_COLORS_SCAD[i % len(MARKER_COLORS_SCAD)]
         lines += [
             f"color({mc})",
@@ -121,30 +116,22 @@ def render_scad_to_png(scad_src: str, png_out: Path) -> bool:
         scad_path.unlink(missing_ok=True)
 
 
-# ---------------------------------------------------------------------------
-# annotation: draw crosshairs at projected positions
-# ---------------------------------------------------------------------------
 def annotate(ref_png: Path, pieces: list, out_png: Path) -> None:
+    """Draw projected crosshairs over the reference render."""
     img  = Image.open(ref_png).convert("RGBA")
     draw = ImageDraw.Draw(img)
-
-    cx = cy = IMG_PX / 2   # canvas centre = OS origin
+    cx = cy = IMG_PX / 2
 
     for i, piece in enumerate(pieces):
         if piece.part not in PART_MAP:
             continue
-
         sx, sy, _ = project_ldraw(piece.pos)
         px = cx + sx * PX_PER_MM
         py = cy + sy * PX_PER_MM
-
         col = MARKER_COLORS_PIL[i % len(MARKER_COLORS_PIL)]
         R   = 10
-
-        # Crosshair
         draw.line([(px - R*2, py), (px + R*2, py)], fill=col, width=2)
         draw.line([(px, py - R*2), (px, py + R*2)], fill=col, width=2)
-        # Circle
         draw.ellipse([(px - R, py - R), (px + R, py + R)], outline=col, width=2)
 
     img.save(out_png)
@@ -153,8 +140,6 @@ def annotate(ref_png: Path, pieces: list, out_png: Path) -> None:
 # ---------------------------------------------------------------------------
 # sphere-centroid measurement (ground truth from reference render)
 # ---------------------------------------------------------------------------
-# Color ranges used to isolate each sphere in the rendered image.
-# Keys must match MARKER_COLORS_PIL order.
 _COLOR_RANGES = {
     "red":     ((160, 255), (  0,  80), (  0,  80)),
     "lime":    ((  0,  80), (160, 255), (  0,  80)),
@@ -176,16 +161,56 @@ def measure_sphere_centroids(ref_png: Path) -> dict[str, tuple[float, float]]:
             (arr[:, :, 2] >= br[0]) & (arr[:, :, 2] <= br[1])
         )
         ys, xs = np.where(mask)
-        if len(xs) >= 5:   # ignore stray pixels
+        if len(xs) >= 5:
             result[name] = (float(xs.mean()), float(ys.mean()))
     return result
 
 
 # ---------------------------------------------------------------------------
-# main
+# pytest fixtures and test
+# ---------------------------------------------------------------------------
+@pytest.fixture(scope="session")
+def ref_png(tmp_path_factory):
+    pieces = parse_ldr(LDR_PATH)
+    scad   = build_reference_scad(pieces)
+    png    = tmp_path_factory.mktemp("projection") / "ref_scene.png"
+    ok     = render_scad_to_png(scad, png)
+    assert ok, "OpenSCAD reference render failed"
+    return png
+
+
+@pytest.fixture(scope="session")
+def centroids(ref_png):
+    return measure_sphere_centroids(ref_png)
+
+
+def test_projection_accuracy(centroids):
+    pieces = parse_ldr(LDR_PATH)
+    known  = [p for p in pieces if p.part in PART_MAP]
+    cx = cy = IMG_PX / 2
+
+    for i, piece in enumerate(known):
+        sx, sy, _ = project_ldraw(piece.pos)
+        proj_x = cx + sx * PX_PER_MM
+        proj_y = cy + sy * PX_PER_MM
+        col  = MARKER_COLORS_PIL[i % len(MARKER_COLORS_PIL)]
+        meas = centroids.get(col)
+        assert meas is not None, f"No sphere detected for {piece.part} ({col})"
+        ex = proj_x - meas[0]
+        ey = proj_y - meas[1]
+        assert abs(ex) < X_TOLERANCE, (
+            f"{piece.part}: X error {ex:+.1f} px exceeds ±{X_TOLERANCE} px"
+        )
+        assert abs(ey) < Y_TOLERANCE, (
+            f"{piece.part}: Y error {ey:+.1f} px exceeds ±{Y_TOLERANCE} px"
+        )
+
+
+# ---------------------------------------------------------------------------
+# standalone script entry point
 # ---------------------------------------------------------------------------
 def main() -> None:
-    ldr_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("test.ldr")
+    ldr_path = Path(sys.argv[1]) if len(sys.argv) > 1 else LDR_PATH
     ref_png  = Path("/tmp/ref_scene.png")
     ann_png  = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("/tmp/ref_annotated.png")
 
@@ -210,7 +235,6 @@ def main() -> None:
     print("If projection is correct, every crosshair sits on its sphere centre.")
     print()
 
-    # Measure actual sphere positions from the reference render
     print("Measuring sphere centroids from reference render …")
     measured = measure_sphere_centroids(ref_png)
 
@@ -225,12 +249,12 @@ def main() -> None:
         col = MARKER_COLORS_PIL[i % len(MARKER_COLORS_PIL)]
         meas = measured.get(col)
         if meas:
-            ex, ey = proj_x - meas[0], proj_y - meas[1]
-            meas_str  = f"({meas[0]:6.1f},{meas[1]:6.1f})"
-            err_str   = f"({ex:+6.1f},{ey:+6.1f})"
+            ex, ey   = proj_x - meas[0], proj_y - meas[1]
+            meas_str = f"({meas[0]:6.1f},{meas[1]:6.1f})"
+            err_str  = f"({ex:+6.1f},{ey:+6.1f})"
         else:
-            meas_str  = "       n/a      "
-            err_str   = "      n/a     "
+            meas_str = "       n/a      "
+            err_str  = "      n/a     "
         proj_str = f"({proj_x:6.1f},{proj_y:6.1f})"
         print(f"{p.part:8s}  {col:8s}  {meas_str:>16s}  {proj_str:>16s}  {err_str:>14s}")
 
