@@ -7,6 +7,7 @@ import argparse
 import subprocess
 import tempfile
 import base64
+import hashlib
 from pathlib import Path
 from dataclasses import dataclass
 
@@ -308,7 +309,9 @@ def compose_svg(
     defs: dict[str, tuple[str, float, float]] = {}  # label → (def_id, anchor_x, anchor_y)
     for _, _, _, _, img, anchor_x, anchor_y, iw, ih, label in projected:
         if label not in defs:
-            def_id = f"piece-{len(defs)}"
+            part_name = label.split()[0]
+            short_hash = hashlib.sha256(label.encode()).hexdigest()[:8]
+            def_id = f"{part_name}-{short_hash}"
             buf = io.BytesIO()
             img.save(buf, format="PNG")
             b64 = base64.b64encode(buf.getvalue()).decode()
