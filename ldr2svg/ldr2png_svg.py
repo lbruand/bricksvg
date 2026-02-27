@@ -365,27 +365,13 @@ def compose_svg(
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Render each LDraw piece with LEGO.scad, compose into SVG."
-    )
-    parser.add_argument("input", help="Input .ldr file")
-    parser.add_argument("-o", "--output", help="Output SVG (default: <input>_lego.svg)")
-    parser.add_argument("--keep-pngs", action="store_true",
-                        help="Keep per-piece PNGs in a tmp directory")
-    args = parser.parse_args()
-
-    input_path  = Path(args.input)
-    output_path = args.output or str(input_path.with_name(input_path.stem + "_lego.svg"))
-
-    pieces = parse_ldr(input_path)
-    print(f"Found {len(pieces)} pieces in {input_path}")
-
+def build_pngs(
+    pieces: list[Piece],
+    tmpdir: Path,
+    keep_pngs: bool = False,
+) -> list[tuple[Piece, Image.Image, float, float]]:
+    """Render each piece to a PNG (with caching) and return (piece, img, ax, ay) tuples."""
     pngs: list[tuple[Piece, Image.Image, float, float]] = []
-    tmpdir = Path(tempfile.mkdtemp(prefix="ldr2png_"))
-    print(f"Rendering pieces (tmpdir: {tmpdir}) …")
-
-    # Cache keyed by (part_name, color_id, rotation_bytes) — same appearance = same PNG.
     render_cache: dict[tuple, tuple[Image.Image, float, float]] = {}
 
     for i, piece in enumerate(pieces):
@@ -411,10 +397,34 @@ def main() -> None:
                     render_cache[cache_key] = (img, anchor_x, anchor_y)
                     pngs.append((piece, img, anchor_x, anchor_y))
                     print("ok")
-                    if not args.keep_pngs:
+                    if not keep_pngs:
                         png_path.unlink(missing_ok=True)
                 else:
                     print("FAILED — skipping")
+
+    return pngs
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Render each LDraw piece with LEGO.scad, compose into SVG."
+    )
+    parser.add_argument("input", help="Input .ldr file")
+    parser.add_argument("-o", "--output", help="Output SVG (default: <input>_lego.svg)")
+    parser.add_argument("--keep-pngs", action="store_true",
+                        help="Keep per-piece PNGs in a tmp directory")
+    args = parser.parse_args()
+
+    input_path  = Path(args.input)
+    output_path = args.output or str(input_path.with_name(input_path.stem + "_lego.svg"))
+
+    pieces = parse_ldr(input_path)
+    print(f"Found {len(pieces)} pieces in {input_path}")
+
+    tmpdir = Path(tempfile.mkdtemp(prefix="ldr2png_"))
+    print(f"Rendering pieces (tmpdir: {tmpdir}) …")
+
+    pngs = build_pngs(pieces, tmpdir, keep_pngs=args.keep_pngs)
 
     if not pngs:
         print("No pieces rendered — nothing to compose.", file=sys.stderr)

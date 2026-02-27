@@ -5,10 +5,12 @@ import pytest
 import svgwrite
 from pathlib import Path
 from PIL import Image
+from unittest.mock import patch, MagicMock
 
 from ldr2svg.ldr2png_svg import (
     parse_ldr, _parse_ldr_line, project_ldraw, ldraw_rgb, PART_MAP,
     _project_pieces, _canvas_bounds, _build_defs, _inject_def_comments,
+    build_pngs,
 )
 
 LDR_PATH = Path(__file__).parent.parent / "test.ldr"
@@ -198,6 +200,71 @@ class TestInjectDefComments:
         _inject_def_comments(str(svg), {"first": ("x", 0.0, 0.0), "second": ("y", 0.0, 0.0)})
         result = svg.read_text()
         assert result.index("<!-- first -->") < result.index("<!-- second -->")
+
+
+_FAKE_IMG = Image.new("RGBA", (100, 80))
+_FAKE_RENDER = (True, (_FAKE_IMG, 50.0, 40.0))   # render_piece → True, remove_and_crop → tuple
+
+
+def _fake_remove_and_crop(_path):
+    return _FAKE_IMG, 50.0, 40.0
+
+
+class TestBuildPngs:
+    def _run(self, pieces, tmp_path, keep_pngs=False):
+        with patch("ldr2svg.ldr2png_svg.render_piece", return_value=True), \
+             patch("ldr2svg.ldr2png_svg.remove_and_crop", side_effect=_fake_remove_and_crop):
+            return build_pngs(pieces, tmp_path, keep_pngs=keep_pngs)
+
+    def test_known_parts_returned(self, tmp_path):
+        pieces = [p for p in parse_ldr(LDR_PATH) if p.part in PART_MAP]
+        result = self._run(pieces, tmp_path)
+        assert len(result) == len(pieces)
+
+    def test_unknown_part_skipped(self, tmp_path):
+        pieces = parse_ldr(LDR_PATH)
+        # All parts in test.ldr are known, so inject one unknown
+        from ldr2svg.ldr2png_svg import Piece
+        unknown = Piece(part="unknown_part_xyz", color=1,
+                        pos=np.zeros(3), rot=np.eye(3))
+        result = self._run([unknown], tmp_path)
+        assert result == []
+
+    def test_identical_pieces_cached(self, tmp_path):
+        """Two identical pieces should only call render_piece once."""
+        pieces = [p for p in parse_ldr(LDR_PATH) if p.part == "3062a"]
+        assert len(pieces) == 3
+        with patch("ldr2svg.ldr2png_svg.render_piece", return_value=True) as mock_render, \
+             patch("ldr2svg.ldr2png_svg.remove_and_crop", side_effect=_fake_remove_and_crop):
+            result = build_pngs(pieces, tmp_path)
+        assert len(result) == 3
+        mock_render.assert_called_once()   # cached after first render
+
+    def test_failed_render_skipped(self, tmp_path):
+        pieces = [p for p in parse_ldr(LDR_PATH) if p.part in PART_MAP][:1]
+        with patch("ldr2svg.ldr2png_svg.render_piece", return_value=False), \
+             patch("ldr2svg.ldr2png_svg.remove_and_crop", side_effect=_fake_remove_and_crop):
+            result = build_pngs(pieces, tmp_path)
+        assert result == []
+
+    def test_keep_pngs_false_removes_files(self, tmp_path):
+        pieces = [p for p in parse_ldr(LDR_PATH) if p.part in PART_MAP][:1]
+        with patch("ldr2svg.ldr2png_svg.render_piece", return_value=True), \
+             patch("ldr2svg.ldr2png_svg.remove_and_crop", side_effect=_fake_remove_and_crop):
+            build_pngs(pieces, tmp_path, keep_pngs=False)
+        assert list(tmp_path.glob("*.png")) == []
+
+    def test_keep_pngs_true_retains_files(self, tmp_path):
+        pieces = [p for p in parse_ldr(LDR_PATH) if p.part in PART_MAP][:1]
+        with patch("ldr2svg.ldr2png_svg.render_piece", return_value=True), \
+             patch("ldr2svg.ldr2png_svg.remove_and_crop", side_effect=_fake_remove_and_crop):
+            # render_piece writes nothing, so create the file manually to test keep logic
+            def fake_render(scad_src, png_path):
+                png_path.write_bytes(b"")
+                return True
+            with patch("ldr2svg.ldr2png_svg.render_piece", side_effect=fake_render):
+                build_pngs(pieces, tmp_path, keep_pngs=True)
+        assert len(list(tmp_path.glob("*.png"))) == 1
 
 
 class TestZOrderSort:
