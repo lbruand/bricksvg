@@ -26,8 +26,10 @@ LEGOLIB = Path(__file__).parent / "LEGO.scad"
 # ---------------------------------------------------------------------------
 # Camera parameters (OpenSCAD)
 # ---------------------------------------------------------------------------
-# Standard LEGO instruction-style view:  rx=60 tilt, rz=45 spin, ortho
-CAMERA_RX = 60.0   # degrees tilt (around X)
+# True isometric: camera along (1,1,1)/√3 ↔ rx = arccos(1/√3) ≈ 54.74°, rz = 45°.
+# All three world axes project with equal foreshortening; horizontal axes
+# appear at exactly ±30° on screen.
+CAMERA_RX = math.degrees(math.acos(1 / math.sqrt(3)))  # ≈ 54.74°
 CAMERA_RZ = 45.0   # degrees spin (around Z)
 CAMERA_D  = 300.0  # camera distance (mm) — controls scale
 IMG_PX    = 800    # render each piece into a square IMG_PX × IMG_PX PNG
@@ -36,6 +38,14 @@ IMG_PX    = 800    # render each piece into a square IMG_PX × IMG_PX PNG
 # OpenSCAD default full perspective FOV = 22.5°.
 _OPENSCAD_FOV_DEG = 22.5
 PX_PER_MM = IMG_PX / (2 * CAMERA_D * math.tan(math.radians(_OPENSCAD_FOV_DEG / 2)))
+
+# ---------------------------------------------------------------------------
+# Isometric grid
+# ---------------------------------------------------------------------------
+GRID_STEP   = 20      # LDU = 1 LEGO stud = 8 mm
+GRID_MARGIN = 2       # extra grid cells around scene bounding box
+GRID_COLOR  = "#c0b8b0"
+GRID_WIDTH  = "0.5"
 
 # ---------------------------------------------------------------------------
 # LDraw colour table
@@ -297,12 +307,15 @@ def _project_pieces(
 def _canvas_bounds(
     projected: list[tuple],
     padding: int,
+    extra_sx_sy: list[tuple[float, float]] = (),
 ) -> tuple[int, int, float, float]:
     """Return (W, H, min_x, min_y) for the SVG canvas."""
     xs = ([sx - ax       for sx, _,  ax, _,  iw, _,  _ in projected] +
-          [sx - ax + iw  for sx, _,  ax, _,  iw, _,  _ in projected])
+          [sx - ax + iw  for sx, _,  ax, _,  iw, _,  _ in projected] +
+          [sx for sx, _ in extra_sx_sy])
     ys = ([sy - ay       for _,  sy, _,  ay, _,  ih, _ in projected] +
-          [sy - ay + ih  for _,  sy, _,  ay, _,  ih, _ in projected])
+          [sy - ay + ih  for _,  sy, _,  ay, _,  ih, _ in projected] +
+          [sy for _, sy in extra_sx_sy])
     min_x, max_x = min(xs), max(xs)
     min_y, max_y = min(ys), max(ys)
     W = int(max_x - min_x + 2 * padding)
@@ -346,6 +359,60 @@ def _inject_def_comments(output: str, defs: dict[str, tuple]) -> None:
     Path(output).write_text(svg_text)
 
 
+def _floor_y_ldu(renders: dict) -> float:
+    """LDraw Y of the floor = max bottom-face Y across all known pieces."""
+    ys = [float(p.pos[1]) + PART_MAP[p.part].h_mm / LDU_TO_MM
+          for _img, _ax, _ay, plist in renders.values()
+          for p in plist if p.part in PART_MAP]
+    return max(ys, default=0.0)
+
+
+def _grid_params(renders: dict) -> tuple | None:
+    """Return (floor_y, gx0, gx1, gz0, gz1) in LDU, or None if no pieces."""
+    all_pieces = [p for _img, _ax, _ay, plist in renders.values() for p in plist]
+    if not all_pieces:
+        return None
+    fy  = _floor_y_ldu(renders)
+    xs  = [float(p.pos[0]) for p in all_pieces]
+    zs  = [float(p.pos[2]) for p in all_pieces]
+    gx0 = (math.floor(min(xs) / GRID_STEP) - GRID_MARGIN) * GRID_STEP
+    gx1 = (math.ceil (max(xs) / GRID_STEP) + GRID_MARGIN) * GRID_STEP
+    gz0 = (math.floor(min(zs) / GRID_STEP) - GRID_MARGIN) * GRID_STEP
+    gz1 = (math.ceil (max(zs) / GRID_STEP) + GRID_MARGIN) * GRID_STEP
+    return fy, gx0, gx1, gz0, gz1
+
+
+def _grid_corner_sx_sy(fy: float, gx0: float, gx1: float,
+                       gz0: float, gz1: float) -> list[tuple[float, float]]:
+    """Screen-space (sx_px, sy_px) for the four corners of the grid."""
+    return [(project_ldraw(np.array([x, fy, z]))[0] * PX_PER_MM,
+             project_ldraw(np.array([x, fy, z]))[1] * PX_PER_MM)
+            for x, z in [(gx0, gz0), (gx0, gz1), (gx1, gz0), (gx1, gz1)]]
+
+
+def _draw_isometric_grid(dwg: svgwrite.Drawing, fy: float,
+                         gx0: float, gx1: float, gz0: float, gz1: float,
+                         cx, cy) -> None:
+    """Draw two families of isometric grid lines into dwg."""
+    kw = {"stroke": GRID_COLOR, "stroke_width": GRID_WIDTH}
+
+    def proj(x: float, z: float) -> tuple[str, str]:
+        sx, sy, _ = project_ldraw(np.array([x, fy, z]))
+        return f"{cx(sx * PX_PER_MM):.1f}", f"{cy(sy * PX_PER_MM):.1f}"
+
+    # Lines parallel to LDraw X (constant Z)
+    z = gz0
+    while z <= gz1:
+        dwg.add(dwg.line(proj(gx0, z), proj(gx1, z), **kw))
+        z += GRID_STEP
+
+    # Lines parallel to LDraw Z (constant X)
+    x = gx0
+    while x <= gx1:
+        dwg.add(dwg.line(proj(x, gz0), proj(x, gz1), **kw))
+        x += GRID_STEP
+
+
 def compose_svg(
     renders: dict[str, tuple[Image.Image, float, float, list[Piece]]],
     output: str,
@@ -356,14 +423,21 @@ def compose_svg(
         for img, ax, ay, piece_list in renders.values()
         for piece in piece_list
     ]
-    projected          = _project_pieces(pngs)
-    W, H, min_x, min_y = _canvas_bounds(projected, padding)
+    projected = _project_pieces(pngs)
+
+    grid = _grid_params(renders)
+    grid_corners = _grid_corner_sx_sy(*grid) if grid else []
+
+    W, H, min_x, min_y = _canvas_bounds(projected, padding, grid_corners)
 
     def cx(val): return val - min_x + padding
     def cy(val): return val - min_y + padding
 
     dwg = svgwrite.Drawing(output, size=(f"{W}px", f"{H}px"))
     dwg.add(dwg.rect((0, 0), ("100%", "100%"), fill="#f8f8f0"))
+
+    if grid:
+        _draw_isometric_grid(dwg, *grid, cx, cy)
 
     defs = _build_defs(dwg, renders)
 
