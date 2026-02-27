@@ -401,17 +401,12 @@ def _draw_isometric_grid(dwg: svgwrite.Drawing, fy: float,
         sx, sy, _ = project_ldraw(np.array([x, fy, z]))
         return f"{cx(sx * PX_PER_MM):.1f}", f"{cy(sy * PX_PER_MM):.1f}"
 
-    # Lines parallel to LDraw X (constant Z)
-    z = gz0
-    while z <= gz1:
-        grp.add(dwg.line(proj(gx0, z), proj(gx1, z), **kw))
-        z += GRID_STEP
+    zs = range(int(gz0), int(gz1) + 1, GRID_STEP)
+    xs = range(int(gx0), int(gx1) + 1, GRID_STEP)
 
-    # Lines parallel to LDraw Z (constant X)
-    x = gx0
-    while x <= gx1:
-        grp.add(dwg.line(proj(x, gz0), proj(x, gz1), **kw))
-        x += GRID_STEP
+    for line in ([dwg.line(proj(gx0, z), proj(gx1, z), **kw) for z in zs] +
+                 [dwg.line(proj(x, gz0), proj(x, gz1), **kw) for x in xs]):
+        grp.add(line)
 
     dwg.add(grp)
 
