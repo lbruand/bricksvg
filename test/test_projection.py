@@ -20,13 +20,9 @@ import pytest
 from PIL import Image, ImageDraw
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from ldr2svg.ldr2png_svg import (
-    parse_ldr, PART_MAP, ldraw_rgb,
-    _T, LDU_TO_MM, PX_PER_MM,
-    CAMERA_RX, CAMERA_RZ, CAMERA_D, IMG_PX,
-    LEGOLIB,
-    project_ldraw,
-)
+from ldr2svg.parts import parse_ldr, PART_MAP, ldraw_rgb
+from ldr2svg.projection import _T, LDU_TO_MM, PX_PER_MM, CAMERA_RX, CAMERA_RZ, CAMERA_D, IMG_PX, project_ldraw
+from ldr2svg.scad import LEGOLIB
 
 # ---------------------------------------------------------------------------
 # reference-scene SCAD builder

@@ -9,6 +9,12 @@ dependencies = [
     "svgwrite>=1.4.3",
 ]
 
+[project.scripts]
+ldr2svg = "ldr2svg.ldr2png_svg:main"
+
+[tool.uv]
+package = true
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",
