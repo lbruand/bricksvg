@@ -2,10 +2,13 @@
 
 import numpy as np
 import pytest
+import svgwrite
 from pathlib import Path
+from PIL import Image
 
 from ldr2svg.ldr2png_svg import (
     parse_ldr, project_ldraw, ldraw_rgb, PART_MAP,
+    _project_pieces, _canvas_bounds, _build_defs, _inject_def_comments,
 )
 
 LDR_PATH = Path(__file__).parent.parent / "test.ldr"
@@ -77,6 +80,100 @@ class TestPartMap:
 
     def test_plate_thinner_than_brick(self):
         assert PART_MAP["3666"].h_mm < PART_MAP["3062a"].h_mm
+
+
+def _make_pngs():
+    """Minimal pngs list from test.ldr with synthetic images."""
+    pieces = parse_ldr(LDR_PATH)
+    return [
+        (p, Image.new("RGBA", (100, 80)), 50.0, 40.0)
+        for p in pieces if p.part in PART_MAP
+    ]
+
+
+def _projected_row(sx=0.0, sy=0.0, ax=0.0, ay=0.0, iw=100, ih=80, label="test"):
+    """Minimal projected tuple for _canvas_bounds testing."""
+    return (0.0, 0.0, sx, sy, None, ax, ay, iw, ih, label)
+
+
+class TestProjectPieces:
+    def test_returns_correct_count(self):
+        assert len(_project_pieces(_make_pngs())) == 5
+
+    def test_tuple_has_ten_fields(self):
+        assert all(len(row) == 10 for row in _project_pieces(_make_pngs()))
+
+    def test_elevated_pieces_last(self):
+        """Pieces with ldY=-32 (elevated) must be last in the sorted output."""
+        result = _project_pieces(_make_pngs())
+        ldys = [row[1] for row in result]
+        assert ldys[-1] < ldys[0]   # last (on top) is more negative = higher in scene
+
+
+class TestCanvasBounds:
+    def test_single_piece_size(self):
+        row = _projected_row(sx=0, sy=0, ax=0, ay=0, iw=100, ih=80)
+        W, H, _, _ = _canvas_bounds([row], padding=10)
+        assert W == 120   # 100 + 2×10
+        assert H == 100   # 80  + 2×10
+
+    def test_no_padding(self):
+        row = _projected_row(sx=0, sy=0, ax=0, ay=0, iw=50, ih=30)
+        W, H, _, _ = _canvas_bounds([row], padding=0)
+        assert W == 50
+        assert H == 30
+
+    def test_min_xy_offset(self):
+        row = _projected_row(sx=200, sy=100, ax=0, ay=0, iw=50, ih=30)
+        _, _, min_x, min_y = _canvas_bounds([row], padding=0)
+        assert min_x == pytest.approx(200.0)
+        assert min_y == pytest.approx(100.0)
+
+
+class TestBuildDefs:
+    def test_deduplicates_identical_labels(self, tmp_path):
+        """Three identical 3062a pieces → only one entry in defs."""
+        projected = _project_pieces(_make_pngs())
+        dwg = svgwrite.Drawing(str(tmp_path / "t.svg"))
+        defs = _build_defs(dwg, projected)
+        assert len(defs) == 3   # 3666, 60474, 3062a
+
+    def test_def_id_format(self, tmp_path):
+        """def_id must be '{part}-{8 hex chars}'."""
+        projected = _project_pieces(_make_pngs())
+        dwg = svgwrite.Drawing(str(tmp_path / "t.svg"))
+        defs = _build_defs(dwg, projected)
+        for label, (def_id, _, _) in defs.items():
+            part = label.split()[0]
+            assert def_id.startswith(f"{part}-")
+            suffix = def_id[len(part) + 1:]
+            assert len(suffix) == 8
+            assert all(c in "0123456789abcdef" for c in suffix)
+
+    def test_anchors_stored(self, tmp_path):
+        projected = _project_pieces(_make_pngs())
+        dwg = svgwrite.Drawing(str(tmp_path / "t.svg"))
+        defs = _build_defs(dwg, projected)
+        for _, (_, ax, ay) in defs.items():
+            assert isinstance(ax, float)
+            assert isinstance(ay, float)
+
+
+class TestInjectDefComments:
+    def test_comments_inserted(self, tmp_path):
+        svg = tmp_path / "t.svg"
+        svg.write_text('<svg><defs><image id="a"/><image id="b"/></defs></svg>')
+        _inject_def_comments(str(svg), {"label-a": ("a", 0.0, 0.0), "label-b": ("b", 0.0, 0.0)})
+        result = svg.read_text()
+        assert "<!-- label-a -->" in result
+        assert "<!-- label-b -->" in result
+
+    def test_comments_in_order(self, tmp_path):
+        svg = tmp_path / "t.svg"
+        svg.write_text('<svg><image id="x"/><image id="y"/></svg>')
+        _inject_def_comments(str(svg), {"first": ("x", 0.0, 0.0), "second": ("y", 0.0, 0.0)})
+        result = svg.read_text()
+        assert result.index("<!-- first -->") < result.index("<!-- second -->")
 
 
 class TestZOrderSort:
