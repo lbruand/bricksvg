@@ -282,14 +282,16 @@ def _project_piece(
 
 def _project_pieces(
     pngs: list[tuple[Piece, Image.Image, float, float]],
-) -> list[tuple[float, float, float, float, Image.Image, float, float, int, int, str]]:
-    """Project each piece to screen coords and sort back-to-front."""
+) -> list[tuple[float, float, float, float, int, int, str]]:
+    """Project each piece to screen coords and sort back-to-front.
+
+    Returns (sx_px, sy_px, ax, ay, iw, ih, label) per piece.
+    """
     # Sort back-to-front: primary = LDraw Y descending (lower pieces first, elevated last),
     # secondary = cam depth ascending (farther first) for same-height pieces.
-    return sorted(
-        [_project_piece(*t) for t in pngs],
-        key=lambda t: (-t[1], t[0]),
-    )
+    rows = sorted([_project_piece(*t) for t in pngs], key=lambda t: (-t[1], t[0]))
+    return [(sx, sy, ax, ay, iw, ih, label)
+            for _, _, sx, sy, _, ax, ay, iw, ih, label in rows]
 
 
 def _canvas_bounds(
@@ -297,10 +299,10 @@ def _canvas_bounds(
     padding: int,
 ) -> tuple[int, int, float, float]:
     """Return (W, H, min_x, min_y) for the SVG canvas."""
-    xs = ([sx - ax       for _, _, sx, _,  _, ax, _,  iw, _,  _ in projected] +
-          [sx - ax + iw  for _, _, sx, _,  _, ax, _,  iw, _,  _ in projected])
-    ys = ([sy - ay       for _, _, _,  sy, _, _,  ay, _,  ih, _ in projected] +
-          [sy - ay + ih  for _, _, _,  sy, _, _,  ay, _,  ih, _ in projected])
+    xs = ([sx - ax       for sx, _,  ax, _,  iw, _,  _ in projected] +
+          [sx - ax + iw  for sx, _,  ax, _,  iw, _,  _ in projected])
+    ys = ([sy - ay       for _,  sy, _,  ay, _,  ih, _ in projected] +
+          [sy - ay + ih  for _,  sy, _,  ay, _,  ih, _ in projected])
     min_x, max_x = min(xs), max(xs)
     min_y, max_y = min(ys), max(ys)
     W = int(max_x - min_x + 2 * padding)
@@ -358,7 +360,7 @@ def compose_svg(
 
     defs = _build_defs(dwg, renders)
 
-    for _, _, sx_px, sy_px, _, _, _, _, _, label in projected:
+    for sx_px, sy_px, _, _, _, _, label in projected:
         def_id, ax, ay = defs[label]
         dwg.add(dwg.use(f"#{def_id}", insert=(f"{cx(sx_px) - ax:.1f}px", f"{cy(sy_px) - ay:.1f}px")))
 

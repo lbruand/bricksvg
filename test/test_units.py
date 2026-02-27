@@ -130,7 +130,7 @@ def _make_renders():
 
 def _projected_row(sx=0.0, sy=0.0, ax=0.0, ay=0.0, iw=100, ih=80, label="test"):
     """Minimal projected tuple for _canvas_bounds testing."""
-    return (0.0, 0.0, sx, sy, None, ax, ay, iw, ih, label)
+    return (sx, sy, ax, ay, iw, ih, label)
 
 
 class TestProjectPiece:
@@ -177,14 +177,14 @@ class TestProjectPieces:
     def test_returns_correct_count(self):
         assert len(_project_pieces(_make_pngs())) == 5
 
-    def test_tuple_has_ten_fields(self):
-        assert all(len(row) == 10 for row in _project_pieces(_make_pngs()))
+    def test_tuple_has_seven_fields(self):
+        assert all(len(row) == 7 for row in _project_pieces(_make_pngs()))
 
     def test_elevated_pieces_last(self):
         """Pieces with ldY=-32 (elevated) must be last in the sorted output."""
         result = _project_pieces(_make_pngs())
-        ldys = [row[1] for row in result]
-        assert ldys[-1] < ldys[0]   # last (on top) is more negative = higher in scene
+        sy_pxs = [row[1] for row in result]
+        assert sy_pxs[-1] < sy_pxs[0]   # last (on top) has smaller screen_y = higher on screen
 
 
 class TestCanvasBounds:
