@@ -297,10 +297,10 @@ def _canvas_bounds(
     padding: int,
 ) -> tuple[int, int, float, float]:
     """Return (W, H, min_x, min_y) for the SVG canvas."""
-    xs = ([sx - ax       for _, _, sx, sy, img, ax, ay, iw, ih, _ in projected] +
-          [sx - ax + iw  for _, _, sx, sy, img, ax, ay, iw, ih, _ in projected])
-    ys = ([sy - ay       for _, _, sx, sy, img, ax, ay, iw, ih, _ in projected] +
-          [sy - ay + ih  for _, _, sx, sy, img, ax, ay, iw, ih, _ in projected])
+    xs = ([sx - ax       for _, _, sx, _,  _, ax, _,  iw, _,  _ in projected] +
+          [sx - ax + iw  for _, _, sx, _,  _, ax, _,  iw, _,  _ in projected])
+    ys = ([sy - ay       for _, _, _,  sy, _, _,  ay, _,  ih, _ in projected] +
+          [sy - ay + ih  for _, _, _,  sy, _, _,  ay, _,  ih, _ in projected])
     min_x, max_x = min(xs), max(xs)
     min_y, max_y = min(ys), max(ys)
     W = int(max_x - min_x + 2 * padding)
