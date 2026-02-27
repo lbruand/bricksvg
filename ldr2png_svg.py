@@ -2,6 +2,7 @@
 """ldr2png_svg.py - Render each LDraw piece with LEGO.scad/OpenSCAD, then compose into SVG."""
 
 import sys
+import math
 import argparse
 import subprocess
 import tempfile
@@ -27,8 +28,10 @@ CAMERA_RZ = 45.0   # degrees spin (around Z)
 CAMERA_D  = 300.0  # camera distance (mm) — controls scale
 IMG_PX    = 800    # render each piece into a square IMG_PX × IMG_PX PNG
 
-# Pixel/mm scale: PX_PER_LDU ∝ IMG_PX / CAMERA_D  (empirically 1.75 at 400/300)
-PX_PER_LDU = 1.75 * (IMG_PX / 400)   # scales automatically with IMG_PX
+# OpenSCAD ortho scale: viewport covers 2*D*tan(fov/2) mm → IMG_PX pixels.
+# OpenSCAD default full perspective FOV = 22.5°.
+_OPENSCAD_FOV_DEG = 22.5
+PX_PER_MM = IMG_PX / (2 * CAMERA_D * math.tan(math.radians(_OPENSCAD_FOV_DEG / 2)))
 
 # ---------------------------------------------------------------------------
 # LDraw colour table
@@ -126,11 +129,13 @@ def project_ldraw(pos_ld: np.ndarray) -> tuple[float, float, float]:
 # ---------------------------------------------------------------------------
 # SCAD file generation
 # ---------------------------------------------------------------------------
-def make_scad(part: PartDef, r: tuple[int, int, int]) -> str:
+def make_scad(part: PartDef, r: tuple[int, int, int], rot_ld: np.ndarray) -> str:
     """Return a .scad file that renders *part* centered on the origin.
 
     The LDraw piece origin (top-face centre) is placed at (0, 0, 0) in
     OpenSCAD space.  The block therefore extends downward (negative Z).
+    The LDraw rotation matrix is converted to OpenSCAD axes and applied
+    via multmatrix so each piece renders in its scene orientation.
     """
     r_str = f"[{r[0]/255:.3f}, {r[1]/255:.3f}, {r[2]/255:.3f}]"
     # Centre in X and Y; shift down so that top of block is at z=0
@@ -138,10 +143,17 @@ def make_scad(part: PartDef, r: tuple[int, int, int]) -> str:
     ty = -part.l_mm / 2
     tz = -part.h_mm
     h_param = f"{part.height:.6f}"
+    # Convert LDraw rotation → OpenSCAD rotation: R_os = T @ rot_ld @ T
+    R_os = _T @ rot_ld @ _T
+    def fmt_row(row):
+        return f"[{row[0]:.6f},{row[1]:.6f},{row[2]:.6f},0]"
+    mat_str = (f"[{fmt_row(R_os[0])},{fmt_row(R_os[1])},"
+               f"{fmt_row(R_os[2])},[0,0,0,1]]")
     return (
         f'use <{LEGOLIB}>\n'
         f'$fs = 1.0; $fa = 8;\n'
         f'color({r_str})\n'
+        f'multmatrix({mat_str})\n'
         f'translate([{tx}, {ty}, {tz}])\n'
         f'  block(width={part.width}, length={part.length},\n'
         f'        height={h_param}, type="{part.block_type}");\n'
@@ -256,8 +268,8 @@ def compose_svg(
     projected = []
     for piece, img, anchor_x, anchor_y in pngs:
         sx, sy, depth = project_ldraw(piece.pos)
-        sx_px  = sx * PX_PER_LDU
-        sy_px  = sy * PX_PER_LDU
+        sx_px  = sx * PX_PER_MM
+        sy_px  = sy * PX_PER_MM
         iw, ih = img.size
         projected.append((depth, sx_px, sy_px, img, anchor_x, anchor_y, iw, ih))
 
@@ -327,7 +339,7 @@ def main() -> None:
             continue
 
         r, g, b = ldraw_rgb(piece.color)
-        scad_src = make_scad(part, (r, g, b))
+        scad_src = make_scad(part, (r, g, b), piece.rot)
         png_path = tmpdir / f"piece_{i:03d}_{piece.part}.png"
 
         print(f"  [{i+1}/{len(pieces)}] Rendering {piece.part} (color {piece.color}) …",
