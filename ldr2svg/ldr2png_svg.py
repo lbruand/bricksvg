@@ -6,6 +6,8 @@ import math
 import argparse
 import subprocess
 import tempfile
+import io
+import re
 import base64
 import hashlib
 from pathlib import Path
@@ -266,14 +268,10 @@ def _piece_label(piece: "Piece") -> str:
     return f"{piece.part} color={piece.color} rot={rows}"
 
 
-def compose_svg(
+def _project_pieces(
     pngs: list[tuple[Piece, Image.Image, float, float]],
-    output: str,
-    padding: int = 60,
-) -> None:
-    import io
-
-    # Project each piece origin → 2D + depth
+) -> list[tuple]:
+    """Project each piece to screen coords and sort back-to-front."""
     projected = []
     for piece, img, anchor_x, anchor_y in pngs:
         sx, sy, depth = project_ldraw(piece.pos)
@@ -281,10 +279,19 @@ def compose_svg(
         sy_px  = sy * PX_PER_MM
         ldy    = float(piece.pos[1])   # LDraw Y: more negative = higher in scene
         iw, ih = img.size
-        label = _piece_label(piece)
+        label  = _piece_label(piece)
         projected.append((depth, ldy, sx_px, sy_px, img, anchor_x, anchor_y, iw, ih, label))
+    # Sort back-to-front: primary = LDraw Y descending (lower pieces first, elevated last),
+    # secondary = cam depth ascending (farther first) for same-height pieces.
+    projected.sort(key=lambda t: (-t[1], t[0]))
+    return projected
 
-    # Canvas bounding box: each image placed so anchor aligns with projected pos
+
+def _canvas_bounds(
+    projected: list[tuple],
+    padding: int,
+) -> tuple[int, int, float, float]:
+    """Return (W, H, min_x, min_y) for the SVG canvas."""
     xs = ([sx - ax       for _, _, sx, sy, img, ax, ay, iw, ih, _ in projected] +
           [sx - ax + iw  for _, _, sx, sy, img, ax, ay, iw, ih, _ in projected])
     ys = ([sy - ay       for _, _, sx, sy, img, ax, ay, iw, ih, _ in projected] +
@@ -293,24 +300,20 @@ def compose_svg(
     min_y, max_y = min(ys), max(ys)
     W = int(max_x - min_x + 2 * padding)
     H = int(max_y - min_y + 2 * padding)
+    return W, H, min_x, min_y
 
-    def cx(x): return x - min_x + padding
-    def cy(y): return y - min_y + padding
 
-    # Sort back-to-front: primary = LDraw Y descending (lower pieces first, elevated last),
-    # secondary = cam depth ascending (farther first) for same-height pieces.
-    projected.sort(key=lambda t: (-t[1], t[0]))
-
-    dwg = svgwrite.Drawing(output, size=(f"{W}px", f"{H}px"))
-    dwg.add(dwg.rect((0, 0), ("100%", "100%"), fill="#f8f8f0"))
-
-    # Define each unique image once in <defs>; pieces with the same label share one blob.
-    defs: dict[str, tuple[str, float, float]] = {}  # label → (def_id, anchor_x, anchor_y)
+def _build_defs(
+    dwg: svgwrite.Drawing,
+    projected: list[tuple],
+) -> dict[str, tuple[str, float, float]]:
+    """Add each unique piece image to <defs> once; return label→(def_id, ax, ay)."""
+    defs: dict[str, tuple[str, float, float]] = {}
     for _, _, _, _, img, anchor_x, anchor_y, iw, ih, label in projected:
         if label not in defs:
-            part_name = label.split()[0]
+            part_name  = label.split()[0]
             short_hash = hashlib.sha256(label.encode()).hexdigest()[:8]
-            def_id = f"{part_name}-{short_hash}"
+            def_id     = f"{part_name}-{short_hash}"
             buf = io.BytesIO()
             img.save(buf, format="PNG")
             b64 = base64.b64encode(buf.getvalue()).decode()
@@ -322,23 +325,39 @@ def compose_svg(
                 id=def_id,
             ))
             defs[label] = (def_id, anchor_x, anchor_y)
+    return defs
 
-    # Place <use> elements in painter's order (no per-use comments)
-    for depth, ldy, sx_px, sy_px, img, anchor_x, anchor_y, iw, ih, label in projected:
-        def_id, ax, ay = defs[label]
-        x = cx(sx_px) - ax
-        y = cy(sy_px) - ay
-        dwg.add(dwg.use(f"#{def_id}", insert=(f"{x:.1f}px", f"{y:.1f}px")))
 
-    dwg.save(pretty=True)
-
-    # Inject <!-- label --> comments before each <image in <defs>
-    import re
-    svg_text = Path(output).read_text()
+def _inject_def_comments(output: str, defs: dict[str, tuple]) -> None:
+    """Insert <!-- label --> before each <image element in <defs>."""
     it = iter(defs.keys())
+    svg_text = Path(output).read_text()
     svg_text = re.sub(r"(<image\b)", lambda m: f"<!-- {next(it)} -->\n      {m.group(1)}", svg_text)
     Path(output).write_text(svg_text)
 
+
+def compose_svg(
+    pngs: list[tuple[Piece, Image.Image, float, float]],
+    output: str,
+    padding: int = 60,
+) -> None:
+    projected          = _project_pieces(pngs)
+    W, H, min_x, min_y = _canvas_bounds(projected, padding)
+
+    def cx(val): return val - min_x + padding
+    def cy(val): return val - min_y + padding
+
+    dwg = svgwrite.Drawing(output, size=(f"{W}px", f"{H}px"))
+    dwg.add(dwg.rect((0, 0), ("100%", "100%"), fill="#f8f8f0"))
+
+    defs = _build_defs(dwg, projected)
+
+    for _, _, sx_px, sy_px, _, _, _, _, _, label in projected:
+        def_id, ax, ay = defs[label]
+        dwg.add(dwg.use(f"#{def_id}", insert=(f"{cx(sx_px) - ax:.1f}px", f"{cy(sy_px) - ay:.1f}px")))
+
+    dwg.save(pretty=True)
+    _inject_def_comments(output, defs)
     print(f"Saved: {output}  ({W}×{H} px, {len(projected)} pieces)")
 
 # ---------------------------------------------------------------------------
