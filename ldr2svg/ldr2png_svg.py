@@ -304,29 +304,39 @@ def compose_svg(
     dwg = svgwrite.Drawing(output, size=(f"{W}px", f"{H}px"))
     dwg.add(dwg.rect((0, 0), ("100%", "100%"), fill="#f8f8f0"))
 
-    parts_in_order = []
-    for depth, ldy, sx_px, sy_px, img, anchor_x, anchor_y, iw, ih, part in projected:
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        b64 = base64.b64encode(buf.getvalue()).decode()
-        uri = f"data:image/png;base64,{b64}"
+    # Define each unique image once in <defs>; pieces with the same label share one blob.
+    defs: dict[str, tuple[str, float, float]] = {}  # label → (def_id, anchor_x, anchor_y)
+    for _, _, _, _, img, anchor_x, anchor_y, iw, ih, label in projected:
+        if label not in defs:
+            def_id = f"piece-{len(defs)}"
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            b64 = base64.b64encode(buf.getvalue()).decode()
+            uri = f"data:image/png;base64,{b64}"
+            dwg.defs.add(dwg.image(
+                uri,
+                insert=("0px", "0px"),
+                size=(f"{iw}px", f"{ih}px"),
+                id=def_id,
+            ))
+            defs[label] = (def_id, anchor_x, anchor_y)
 
-        x = cx(sx_px) - anchor_x
-        y = cy(sy_px) - anchor_y
-        dwg.add(dwg.image(
-            uri,
-            insert=(f"{x:.1f}px", f"{y:.1f}px"),
-            size=(f"{iw}px", f"{ih}px"),
-        ))
-        parts_in_order.append(part)
+    # Place <use> elements in painter's order
+    labels_in_order = []
+    for depth, ldy, sx_px, sy_px, img, anchor_x, anchor_y, iw, ih, label in projected:
+        def_id, ax, ay = defs[label]
+        x = cx(sx_px) - ax
+        y = cy(sy_px) - ay
+        dwg.add(dwg.use(f"#{def_id}", insert=(f"{x:.1f}px", f"{y:.1f}px")))
+        labels_in_order.append(label)
 
     dwg.save(pretty=True)
 
-    # Inject <!-- part --> comments before each <image element
+    # Inject <!-- label --> comments before each <use element
     import re
     svg_text = Path(output).read_text()
-    it = iter(parts_in_order)
-    svg_text = re.sub(r"(<image\b)", lambda m: f"<!-- {next(it)} -->\n      {m.group(1)}", svg_text)
+    it = iter(labels_in_order)
+    svg_text = re.sub(r"(<use\b)", lambda m: f"<!-- {next(it)} -->\n      {m.group(1)}", svg_text)
     Path(output).write_text(svg_text)
 
     print(f"Saved: {output}  ({W}×{H} px, {len(projected)} pieces)")
