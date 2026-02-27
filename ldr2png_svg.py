@@ -25,13 +25,10 @@ LEGOLIB = Path(__file__).parent / "LEGO.scad"
 CAMERA_RX = 60.0   # degrees tilt (around X)
 CAMERA_RZ = 45.0   # degrees spin (around Z)
 CAMERA_D  = 300.0  # camera distance (mm) — controls scale
-IMG_PX    = 400    # render each piece into a square IMG_PX × IMG_PX PNG
+IMG_PX    = 800    # render each piece into a square IMG_PX × IMG_PX PNG
 
-# Pixel/mm scale derived empirically from the camera above:
-#   at d=300, imgsize=400, a 1x1 brick (8mm wide) measures ~35px horizontally
-#   → 35/(8*cos45°) ≈ 6.19 px/mm but for depth-preserving ortho: ~4.38 px/mm
-# We treat it as: 1 LDU = 0.4 mm, and empirically 1 LDU ≈ PX_PER_LDU pixels
-PX_PER_LDU = 1.75  # matches d=300, imgsize=400
+# Pixel/mm scale: PX_PER_LDU ∝ IMG_PX / CAMERA_D  (empirically 1.75 at 400/300)
+PX_PER_LDU = 1.75 * (IMG_PX / 400)   # scales automatically with IMG_PX
 
 # ---------------------------------------------------------------------------
 # LDraw colour table
