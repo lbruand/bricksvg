@@ -5,6 +5,8 @@ from pathlib import Path
 
 import numpy as np
 
+from .part_map_data import PART_MAP_DATA
+
 # ---------------------------------------------------------------------------
 # LDraw colour table
 # ---------------------------------------------------------------------------
@@ -39,11 +41,7 @@ class PartDef:
     @property
     def h_mm(self): return self.height * 9.6
 
-PART_MAP: dict[str, PartDef] = {
-    "3666":  PartDef(6, 1, 1/3, "brick"),   # Plate  1×6 — long axis in LDraw X
-    "60474": PartDef(4, 4, 1/3, "brick"),   # Plate 4×4 Round (approximated)
-    "3062a": PartDef(1, 1, 1.0, "round"),   # Brick 1×1 Round
-}
+PART_MAP: dict[str, PartDef] = {k: PartDef(*v) for k, v in PART_MAP_DATA.items()}
 
 # ---------------------------------------------------------------------------
 # LDraw scene parser
