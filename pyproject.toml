@@ -16,3 +16,4 @@ dev = [
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+markers = ["slow: requires OpenSCAD (deselect with -m 'not slow')"]

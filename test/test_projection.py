@@ -185,6 +185,7 @@ def centroids(ref_png):
     return measure_sphere_centroids(ref_png)
 
 
+@pytest.mark.slow
 def test_projection_accuracy(centroids):
     pieces = parse_ldr(LDR_PATH)
     known  = [p for p in pieces if p.part in PART_MAP]
