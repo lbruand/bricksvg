@@ -8,8 +8,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from .parts import PartDef, ldraw_rgb
-from .projection import CAMERA_RX, CAMERA_RZ, CAMERA_D, IMG_PX, _T, LDU_TO_MM
+from .parts import PartDef
+from .projection import CAMERA_RX, CAMERA_RZ, CAMERA_D, IMG_PX, _T
 
 LEGOLIB  = Path(__file__).parent / "LEGO.scad"
 CROP_PAD = 6   # extra transparent pixels around each cropped piece

@@ -5,7 +5,7 @@ import math
 import numpy as np
 import svgwrite
 
-from .parts import Piece, PART_MAP
+from .parts import PART_MAP
 from .projection import project_ldraw, PX_PER_MM, LDU_TO_MM
 
 GRID_STEP   = 20      # LDU = 1 LEGO stud = 8 mm

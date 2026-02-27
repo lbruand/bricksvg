@@ -1,7 +1,6 @@
 """Unit tests for ldr2svg.parts."""
 
 import numpy as np
-import pytest
 from pathlib import Path
 
 from ldr2svg.parts import parse_ldr, _parse_ldr_line, ldraw_rgb, PART_MAP
