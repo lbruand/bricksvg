@@ -342,10 +342,20 @@ def main() -> None:
     tmpdir = Path(tempfile.mkdtemp(prefix="ldr2png_"))
     print(f"Rendering pieces (tmpdir: {tmpdir}) …")
 
+    # Cache keyed by (part_name, color_id, rotation_bytes) — same appearance = same PNG.
+    render_cache: dict[tuple, tuple[Image.Image, float, float]] = {}
+
     for i, piece in enumerate(pieces):
         part = PART_MAP.get(piece.part)
         if part is None:
             print(f"  [{i+1}/{len(pieces)}] Skipping unknown part: {piece.part}")
+            continue
+
+        cache_key = (piece.part, piece.color, piece.rot.tobytes())
+        if cache_key in render_cache:
+            img, anchor_x, anchor_y = render_cache[cache_key]
+            pngs.append((piece, img, anchor_x, anchor_y))
+            print(f"  [{i+1}/{len(pieces)}] Rendering {piece.part} (color {piece.color}) … cached")
             continue
 
         r, g, b = ldraw_rgb(piece.color)
@@ -360,6 +370,7 @@ def main() -> None:
             continue
 
         img, anchor_x, anchor_y = remove_and_crop(png_path)
+        render_cache[cache_key] = (img, anchor_x, anchor_y)
         pngs.append((piece, img, anchor_x, anchor_y))
         print("ok")
 
