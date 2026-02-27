@@ -270,23 +270,26 @@ def _piece_label(piece: "Piece") -> str:
     return f"{piece.part} color={piece.color} rot={rows}"
 
 
+def _project_piece(
+    piece: Piece, img: Image.Image, anchor_x: float, anchor_y: float,
+) -> tuple[float, float, float, float, Image.Image, float, float, int, int, str]:
+    """Project one piece to a screen-space row: (depth, ldy, sx_px, sy_px, img, ax, ay, iw, ih, label)."""
+    sx, sy, depth = project_ldraw(piece.pos)
+    iw, ih = img.size
+    return (depth, float(piece.pos[1]), sx * PX_PER_MM, sy * PX_PER_MM,
+            img, anchor_x, anchor_y, iw, ih, _piece_label(piece))
+
+
 def _project_pieces(
     pngs: list[tuple[Piece, Image.Image, float, float]],
-) -> list[tuple]:
+) -> list[tuple[float, float, float, float, Image.Image, float, float, int, int, str]]:
     """Project each piece to screen coords and sort back-to-front."""
-    projected = []
-    for piece, img, anchor_x, anchor_y in pngs:
-        sx, sy, depth = project_ldraw(piece.pos)
-        sx_px  = sx * PX_PER_MM
-        sy_px  = sy * PX_PER_MM
-        ldy    = float(piece.pos[1])   # LDraw Y: more negative = higher in scene
-        iw, ih = img.size
-        label  = _piece_label(piece)
-        projected.append((depth, ldy, sx_px, sy_px, img, anchor_x, anchor_y, iw, ih, label))
     # Sort back-to-front: primary = LDraw Y descending (lower pieces first, elevated last),
     # secondary = cam depth ascending (farther first) for same-height pieces.
-    projected.sort(key=lambda t: (-t[1], t[0]))
-    return projected
+    return sorted(
+        [_project_piece(*t) for t in pngs],
+        key=lambda t: (-t[1], t[0]),
+    )
 
 
 def _canvas_bounds(

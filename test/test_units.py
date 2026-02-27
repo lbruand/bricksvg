@@ -9,7 +9,7 @@ from unittest.mock import patch, MagicMock
 
 from ldr2svg.ldr2png_svg import (
     parse_ldr, _parse_ldr_line, project_ldraw, ldraw_rgb, PART_MAP,
-    _project_pieces, _canvas_bounds, _build_defs, _inject_def_comments,
+    _project_piece, _project_pieces, _canvas_bounds, _build_defs, _inject_def_comments,
     _piece_label, build_pngs,
 )
 
@@ -131,6 +131,46 @@ def _make_renders():
 def _projected_row(sx=0.0, sy=0.0, ax=0.0, ay=0.0, iw=100, ih=80, label="test"):
     """Minimal projected tuple for _canvas_bounds testing."""
     return (0.0, 0.0, sx, sy, None, ax, ay, iw, ih, label)
+
+
+class TestProjectPiece:
+    def _piece_at(self, x=0.0, y=0.0, z=0.0):
+        from ldr2svg.ldr2png_svg import Piece
+        return Piece(part="3666", color=4,
+                     pos=np.array([x, y, z]), rot=np.eye(3))
+
+    def test_tuple_length(self):
+        piece = self._piece_at()
+        img = Image.new("RGBA", (100, 80))
+        row = _project_piece(piece, img, 50.0, 40.0)
+        assert len(row) == 10
+
+    def test_image_size_fields(self):
+        piece = self._piece_at()
+        img = Image.new("RGBA", (120, 90))
+        row = _project_piece(piece, img, 0.0, 0.0)
+        iw, ih = row[7], row[8]
+        assert iw == 120
+        assert ih == 90
+
+    def test_ldy_is_ldraw_y(self):
+        piece = self._piece_at(y=-32.0)
+        img = Image.new("RGBA", (100, 80))
+        row = _project_piece(piece, img, 0.0, 0.0)
+        assert row[1] == pytest.approx(-32.0)
+
+    def test_label_field(self):
+        piece = self._piece_at()
+        img = Image.new("RGBA", (100, 80))
+        row = _project_piece(piece, img, 0.0, 0.0)
+        assert row[9] == _piece_label(piece)
+
+    def test_anchor_passthrough(self):
+        piece = self._piece_at()
+        img = Image.new("RGBA", (100, 80))
+        row = _project_piece(piece, img, 12.5, 7.3)
+        assert row[5] == pytest.approx(12.5)
+        assert row[6] == pytest.approx(7.3)
 
 
 class TestProjectPieces:
