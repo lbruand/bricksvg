@@ -25,6 +25,28 @@ from ldr2svg.projection import _T, LDU_TO_MM, PX_PER_MM, CAMERA_RX, CAMERA_RZ, C
 from ldr2svg.scad import LEGOLIB
 
 # ---------------------------------------------------------------------------
+# Fast unit tests (no OpenSCAD required)
+# ---------------------------------------------------------------------------
+class TestProjectLdraw:
+    def test_origin_maps_to_zero(self):
+        sx, sy, depth = project_ldraw(np.zeros(3))
+        assert sx == pytest.approx(0.0)
+        assert sy == pytest.approx(0.0)
+        assert depth == pytest.approx(0.0)
+
+    def test_x_symmetry(self):
+        sx1, _, _ = project_ldraw(np.array([10.0, 0.0, 0.0]))
+        sx2, _, _ = project_ldraw(np.array([-10.0, 0.0, 0.0]))
+        assert sx1 == pytest.approx(-sx2)
+
+    def test_elevation_raises_on_screen(self):
+        # Higher in scene (more negative LDraw Y) → smaller screen_y (higher on screen)
+        _, sy_low,  _ = project_ldraw(np.array([0.0, -8.0,  0.0]))
+        _, sy_high, _ = project_ldraw(np.array([0.0, -32.0, 0.0]))
+        assert sy_high < sy_low
+
+
+# ---------------------------------------------------------------------------
 # reference-scene SCAD builder
 # ---------------------------------------------------------------------------
 MARKER_COLORS_SCAD = [
