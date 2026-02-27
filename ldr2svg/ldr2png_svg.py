@@ -16,6 +16,7 @@ from dataclasses import dataclass
 import numpy as np
 from PIL import Image
 import svgwrite
+import svgwrite.image
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -314,7 +315,7 @@ def _build_defs(
     renders: dict[str, tuple["Image.Image", float, float, list]],
 ) -> dict[str, tuple[str, float, float]]:
     """Add each unique piece image to <defs> once; return label→(def_id, ax, ay)."""
-    defs: dict[str, tuple[str, float, float]] = {}
+    defs: dict[str, tuple[str, float, float, svgwrite.image.Image]] = {}
     for label, (img, anchor_x, anchor_y, _pieces) in renders.items():
         part_name  = label.split()[0]
         short_hash = hashlib.sha256(label.encode()).hexdigest()[:8]
@@ -324,14 +325,12 @@ def _build_defs(
         img.save(buf, format="PNG")
         b64 = base64.b64encode(buf.getvalue()).decode()
         uri = f"data:image/png;base64,{b64}"
-        dwg.defs.add(dwg.image(
-            uri,
-            insert=("0px", "0px"),
-            size=(f"{iw}px", f"{ih}px"),
-            id=def_id,
-        ))
-        defs[label] = (def_id, anchor_x, anchor_y)
-    return defs
+        dwg_image:svgwrite.image.Image = dwg.image(uri, insert=("0px", "0px"), size=(f"{iw}px", f"{ih}px"), id=def_id, )
+        defs[label] = (def_id, anchor_x, anchor_y, dwg_image)
+
+    for k, (_, _, _, dwg_image) in defs.items():
+        dwg.defs.add(dwg_image)
+    return {k:(def_id, anchor_x, anchor_y) for k, (def_id, anchor_x, anchor_y, _) in defs.items()}
 
 
 def _inject_def_comments(output: str, defs: dict[str, tuple]) -> None:
