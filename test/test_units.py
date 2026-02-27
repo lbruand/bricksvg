@@ -7,11 +7,13 @@ from pathlib import Path
 from PIL import Image
 from unittest.mock import patch, MagicMock
 
-from ldr2svg.ldr2png_svg import (
-    parse_ldr, _parse_ldr_line, project_ldraw, ldraw_rgb, PART_MAP,
-    _project_piece, _project_pieces, _canvas_bounds, _build_defs, _inject_def_comments,
-    _piece_label, _render_one, build_pngs,
+from ldr2svg.parts import parse_ldr, _parse_ldr_line, ldraw_rgb, PART_MAP, Piece
+from ldr2svg.projection import project_ldraw
+from ldr2svg.compose import (
+    _project_piece, _project_pieces, _canvas_bounds,
+    _build_defs, _inject_def_comments, _piece_label,
 )
+from ldr2svg.ldr2png_svg import _render_one, build_pngs
 
 LDR_PATH = Path(__file__).parent.parent / "test.ldr"
 
@@ -134,7 +136,6 @@ def _projected_row(sx=0.0, sy=0.0, ax=0.0, ay=0.0, iw=100, ih=80, label="test"):
 
 class TestProjectPiece:
     def _piece_at(self, x=0.0, y=0.0, z=0.0):
-        from ldr2svg.ldr2png_svg import Piece
         return Piece(part="3666", color=4,
                      pos=np.array([x, y, z]), rot=np.eye(3))
 
@@ -257,7 +258,6 @@ def _fake_remove_and_crop(_path):
 
 class TestRenderOne:
     def _piece(self):
-        from ldr2svg.ldr2png_svg import Piece
         return Piece(part="3666", color=4, pos=np.zeros(3), rot=np.eye(3))
 
     def test_success_returns_img_and_anchors(self, tmp_path):
@@ -310,7 +310,6 @@ class TestBuildPngs:
         assert len(renders) == 3   # 3666, 60474, 3062a
 
     def test_unknown_part_skipped(self, tmp_path):
-        from ldr2svg.ldr2png_svg import Piece
         unknown = Piece(part="unknown_part_xyz", color=1,
                         pos=np.zeros(3), rot=np.eye(3))
         renders = self._run([unknown], tmp_path)
