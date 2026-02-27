@@ -395,6 +395,7 @@ def _draw_isometric_grid(dwg: svgwrite.Drawing, fy: float,
                          cx, cy) -> None:
     """Draw two families of isometric grid lines into dwg."""
     kw = {"stroke": GRID_COLOR, "stroke_width": GRID_WIDTH}
+    grp = dwg.g(id="grid")
 
     def proj(x: float, z: float) -> tuple[str, str]:
         sx, sy, _ = project_ldraw(np.array([x, fy, z]))
@@ -403,14 +404,16 @@ def _draw_isometric_grid(dwg: svgwrite.Drawing, fy: float,
     # Lines parallel to LDraw X (constant Z)
     z = gz0
     while z <= gz1:
-        dwg.add(dwg.line(proj(gx0, z), proj(gx1, z), **kw))
+        grp.add(dwg.line(proj(gx0, z), proj(gx1, z), **kw))
         z += GRID_STEP
 
     # Lines parallel to LDraw Z (constant X)
     x = gx0
     while x <= gx1:
-        dwg.add(dwg.line(proj(x, gz0), proj(x, gz1), **kw))
+        grp.add(dwg.line(proj(x, gz0), proj(x, gz1), **kw))
         x += GRID_STEP
+
+    dwg.add(grp)
 
 
 def compose_svg(
