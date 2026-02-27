@@ -271,17 +271,16 @@ def _piece_label(piece: "Piece") -> str:
 
 
 def _project_piece(
-    piece: Piece, img: Image.Image, anchor_x: float, anchor_y: float,
-) -> tuple[float, float, float, float, Image.Image, float, float, int, int, str]:
-    """Project one piece to a screen-space row: (depth, ldy, sx_px, sy_px, img, ax, ay, iw, ih, label)."""
+    piece: Piece, iw: int, ih: int, anchor_x: float, anchor_y: float,
+) -> tuple[float, float, float, float, float, float, int, int, str]:
+    """Project one piece to a screen-space row: (depth, ldy, sx_px, sy_px, ax, ay, iw, ih, label)."""
     sx, sy, depth = project_ldraw(piece.pos)
-    iw, ih = img.size
     return (depth, float(piece.pos[1]), sx * PX_PER_MM, sy * PX_PER_MM,
-            img, anchor_x, anchor_y, iw, ih, _piece_label(piece))
+            anchor_x, anchor_y, iw, ih, _piece_label(piece))
 
 
 def _project_pieces(
-    pngs: list[tuple[Piece, Image.Image, float, float]],
+    pngs: list[tuple[Piece, int, int, float, float]],
 ) -> list[tuple[float, float, float, float, int, int, str]]:
     """Project each piece to screen coords and sort back-to-front.
 
@@ -291,7 +290,7 @@ def _project_pieces(
     # secondary = cam depth ascending (farther first) for same-height pieces.
     rows = sorted([_project_piece(*t) for t in pngs], key=lambda t: (-t[1], t[0]))
     return [(sx, sy, ax, ay, iw, ih, label)
-            for _, _, sx, sy, _, ax, ay, iw, ih, label in rows]
+            for _, _, sx, sy, ax, ay, iw, ih, label in rows]
 
 
 def _canvas_bounds(
@@ -344,7 +343,7 @@ def _inject_def_comments(output: str, defs: dict[str, tuple]) -> None:
 
 
 def compose_svg(
-    pngs: list[tuple[Piece, Image.Image, float, float]],
+    pngs: list[tuple[Piece, int, int, float, float]],
     renders: dict[str, tuple[Image.Image, float, float]],
     output: str,
     padding: int = 60,
@@ -375,12 +374,13 @@ def build_pngs(
     pieces: list[Piece],
     tmpdir: Path,
     keep_pngs: bool = False,
-) -> tuple[list[tuple[Piece, Image.Image, float, float]], dict[str, tuple[Image.Image, float, float]]]:
+) -> tuple[list[tuple[Piece, int, int, float, float]], dict[str, tuple[Image.Image, float, float]]]:
     """Render each piece to a PNG (with caching); return (pngs, renders).
 
     renders maps label → (img, ax, ay) for each unique (part, color, rotation).
+    pngs stores (piece, iw, ih, ax, ay) — image dimensions rather than the image itself.
     """
-    pngs: list[tuple[Piece, Image.Image, float, float]] = []
+    pngs: list[tuple[Piece, int, int, float, float]] = []
     renders: dict[str, tuple[Image.Image, float, float]] = {}
 
     for i, piece in enumerate(pieces):
@@ -391,7 +391,8 @@ def build_pngs(
             label = _piece_label(piece)
             if label in renders:
                 img, anchor_x, anchor_y = renders[label]
-                pngs.append((piece, img, anchor_x, anchor_y))
+                iw, ih = img.size
+                pngs.append((piece, iw, ih, anchor_x, anchor_y))
                 print(f"  [{i+1}/{len(pieces)}] Rendering {piece.part} (color {piece.color}) … cached")
             else:
                 r, g, b = ldraw_rgb(piece.color)
@@ -403,8 +404,9 @@ def build_pngs(
                 ok = render_piece(scad_src, png_path)
                 if ok:
                     img, anchor_x, anchor_y = remove_and_crop(png_path)
+                    iw, ih = img.size
                     renders[label] = (img, anchor_x, anchor_y)
-                    pngs.append((piece, img, anchor_x, anchor_y))
+                    pngs.append((piece, iw, ih, anchor_x, anchor_y))
                     print("ok")
                     if not keep_pngs:
                         png_path.unlink(missing_ok=True)

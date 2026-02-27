@@ -109,10 +109,10 @@ class TestPartMap:
 
 
 def _make_pngs():
-    """Minimal pngs list from test.ldr with synthetic images."""
+    """Minimal pngs list from test.ldr with synthetic image sizes."""
     pieces = parse_ldr(LDR_PATH)
     return [
-        (p, Image.new("RGBA", (100, 80)), 50.0, 40.0)
+        (p, 100, 80, 50.0, 40.0)
         for p in pieces if p.part in PART_MAP
     ]
 
@@ -141,36 +141,31 @@ class TestProjectPiece:
 
     def test_tuple_length(self):
         piece = self._piece_at()
-        img = Image.new("RGBA", (100, 80))
-        row = _project_piece(piece, img, 50.0, 40.0)
-        assert len(row) == 10
+        row = _project_piece(piece, 100, 80, 50.0, 40.0)
+        assert len(row) == 9
 
     def test_image_size_fields(self):
         piece = self._piece_at()
-        img = Image.new("RGBA", (120, 90))
-        row = _project_piece(piece, img, 0.0, 0.0)
-        iw, ih = row[7], row[8]
+        row = _project_piece(piece, 120, 90, 0.0, 0.0)
+        iw, ih = row[6], row[7]
         assert iw == 120
         assert ih == 90
 
     def test_ldy_is_ldraw_y(self):
         piece = self._piece_at(y=-32.0)
-        img = Image.new("RGBA", (100, 80))
-        row = _project_piece(piece, img, 0.0, 0.0)
+        row = _project_piece(piece, 100, 80, 0.0, 0.0)
         assert row[1] == pytest.approx(-32.0)
 
     def test_label_field(self):
         piece = self._piece_at()
-        img = Image.new("RGBA", (100, 80))
-        row = _project_piece(piece, img, 0.0, 0.0)
-        assert row[9] == _piece_label(piece)
+        row = _project_piece(piece, 100, 80, 0.0, 0.0)
+        assert row[8] == _piece_label(piece)
 
     def test_anchor_passthrough(self):
         piece = self._piece_at()
-        img = Image.new("RGBA", (100, 80))
-        row = _project_piece(piece, img, 12.5, 7.3)
-        assert row[5] == pytest.approx(12.5)
-        assert row[6] == pytest.approx(7.3)
+        row = _project_piece(piece, 100, 80, 12.5, 7.3)
+        assert row[4] == pytest.approx(12.5)
+        assert row[5] == pytest.approx(7.3)
 
 
 class TestProjectPieces:
