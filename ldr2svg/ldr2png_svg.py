@@ -243,16 +243,16 @@ class Piece:
     rot: np.ndarray    # (3, 3) LDraw rotation matrix
 
 def parse_ldr(path: Path) -> list[Piece]:
-    pieces = []
-    for line in path.read_text(errors="replace").splitlines():
-        parts = line.split()
-        if parts and parts[0] == "1" and len(parts) >= 15:
-            color = int(parts[1])
-            pos   = np.array([float(p) for p in parts[2:5]])
-            rot   = np.array([float(p) for p in parts[5:14]], dtype=float).reshape(3, 3)
-            name  = Path(" ".join(parts[14:])).stem.lower()
-            pieces.append(Piece(part=name, color=color, pos=pos, rot=rot))
-    return pieces
+    def parse_line(parts: list[str]) -> Piece:
+        return Piece(
+            part  = Path(" ".join(parts[14:])).stem.lower(),
+            color = int(parts[1]),
+            pos   = np.array([float(p) for p in parts[2:5]]),
+            rot   = np.array([float(p) for p in parts[5:14]], dtype=float).reshape(3, 3),
+        )
+    lines = path.read_text(errors="replace").splitlines()
+    return [parse_line(p) for p in (line.split() for line in lines)
+            if p and p[0] == "1" and len(p) >= 15]
 
 # ---------------------------------------------------------------------------
 # SVG composition
