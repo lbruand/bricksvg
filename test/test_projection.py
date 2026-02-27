@@ -19,6 +19,7 @@ import numpy as np
 import pytest
 from PIL import Image, ImageDraw
 
+sys.path.insert(0, str(Path(__file__).parent.parent))
 from ldr2svg.ldr2png_svg import (
     parse_ldr, PART_MAP, ldraw_rgb,
     _T, LDU_TO_MM, PX_PER_MM,
@@ -210,9 +211,16 @@ def test_projection_accuracy(centroids):
 # standalone script entry point
 # ---------------------------------------------------------------------------
 def main() -> None:
-    ldr_path = Path(sys.argv[1]) if len(sys.argv) > 1 else LDR_PATH
+    import argparse
+    parser = argparse.ArgumentParser(description="Visual projection accuracy test.")
+    parser.add_argument("ldr", nargs="?", default=str(LDR_PATH), help="Input .ldr file")
+    parser.add_argument("--annotate", metavar="FILE", nargs="?",
+                        const="/tmp/ref_annotated.png",
+                        help="Save annotated image (default: /tmp/ref_annotated.png)")
+    args = parser.parse_args()
+
+    ldr_path = Path(args.ldr)
     ref_png  = Path("/tmp/ref_scene.png")
-    ann_png  = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("/tmp/ref_annotated.png")
 
     pieces = parse_ldr(ldr_path)
     known  = [p for p in pieces if p.part in PART_MAP]
@@ -227,12 +235,12 @@ def main() -> None:
         sys.exit(1)
     print(f"  → {ref_png}")
 
-    print("Annotating with projected crosshairs …")
-    annotate(ref_png, pieces, ann_png)
-    print(f"  → {ann_png}")
-    print()
-    print("Crosshair colour = sphere colour for each piece.")
-    print("If projection is correct, every crosshair sits on its sphere centre.")
+    if args.annotate:
+        ann_png = Path(args.annotate)
+        annotate(ref_png, pieces, ann_png)
+        print(f"  → {ann_png} (annotated)")
+        print("Crosshair colour = sphere colour for each piece.")
+        print("If projection is correct, every crosshair sits on its sphere centre.")
     print()
 
     print("Measuring sphere centroids from reference render …")
