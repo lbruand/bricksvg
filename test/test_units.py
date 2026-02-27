@@ -7,7 +7,7 @@ from pathlib import Path
 from PIL import Image
 
 from ldr2svg.ldr2png_svg import (
-    parse_ldr, project_ldraw, ldraw_rgb, PART_MAP,
+    parse_ldr, _parse_ldr_line, project_ldraw, ldraw_rgb, PART_MAP,
     _project_pieces, _canvas_bounds, _build_defs, _inject_def_comments,
 )
 
@@ -38,6 +38,30 @@ class TestParseLdr:
         f = tmp_path / "t.ldr"
         f.write_text("0 comment\n2 7 0 0 0 10 0 0\n")
         assert parse_ldr(f) == []
+
+
+_SAMPLE_LINE = "1 4 50 -8 60 1 0 0 0 1 0 0 0 1 3666.dat".split()
+
+class TestParseLdrLine:
+    def test_part_name(self):
+        assert _parse_ldr_line(_SAMPLE_LINE).part == "3666"
+
+    def test_color(self):
+        assert _parse_ldr_line(_SAMPLE_LINE).color == 4
+
+    def test_position(self):
+        np.testing.assert_array_equal(_parse_ldr_line(_SAMPLE_LINE).pos, [50, -8, 60])
+
+    def test_rotation_identity(self):
+        np.testing.assert_array_almost_equal(_parse_ldr_line(_SAMPLE_LINE).rot, np.eye(3))
+
+    def test_part_with_spaces_in_filename(self):
+        parts = "1 15 0 0 0 1 0 0 0 1 0 0 0 1 parts/s/some part.dat".split()
+        assert _parse_ldr_line(parts).part == "some part"
+
+    def test_part_stem_lowercased(self):
+        parts = "1 1 0 0 0 1 0 0 0 1 0 0 0 1 3062A.DAT".split()
+        assert _parse_ldr_line(parts).part == "3062a"
 
 
 class TestLdrawRgb:

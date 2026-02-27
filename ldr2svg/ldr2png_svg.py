@@ -242,16 +242,18 @@ class Piece:
     pos: np.ndarray    # (3,) LDraw world position (LDU)
     rot: np.ndarray    # (3, 3) LDraw rotation matrix
 
+def _parse_ldr_line(parts: list[str]) -> Piece:
+    """Parse a tokenised LDraw type-1 line into a Piece. Caller must verify len(parts) >= 15 and parts[0] == '1'."""
+    return Piece(
+        part  = Path(" ".join(parts[14:])).stem.lower(),
+        color = int(parts[1]),
+        pos   = np.array([float(p) for p in parts[2:5]]),
+        rot   = np.array([float(p) for p in parts[5:14]], dtype=float).reshape(3, 3),
+    )
+
 def parse_ldr(path: Path) -> list[Piece]:
-    def parse_line(parts: list[str]) -> Piece:
-        return Piece(
-            part  = Path(" ".join(parts[14:])).stem.lower(),
-            color = int(parts[1]),
-            pos   = np.array([float(p) for p in parts[2:5]]),
-            rot   = np.array([float(p) for p in parts[5:14]], dtype=float).reshape(3, 3),
-        )
     lines = path.read_text(errors="replace").splitlines()
-    return [parse_line(p) for p in (line.split() for line in lines)
+    return [_parse_ldr_line(p) for p in (line.split() for line in lines)
             if p and p[0] == "1" and len(p) >= 15]
 
 # ---------------------------------------------------------------------------
