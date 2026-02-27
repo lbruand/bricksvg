@@ -27,8 +27,8 @@ from PIL import Image, ImageDraw
 # ---------------------------------------------------------------------------
 # pull everything we need from the main script
 # ---------------------------------------------------------------------------
-sys.path.insert(0, str(Path(__file__).parent))
-from ldr2png_svg import (
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from ldr2svg.ldr2png_svg import (
     parse_ldr, PART_MAP, ldraw_rgb,
     _T, LDU_TO_MM, PX_PER_MM,
     CAMERA_RX, CAMERA_RZ, CAMERA_D, IMG_PX,
