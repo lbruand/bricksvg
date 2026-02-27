@@ -307,26 +307,26 @@ def _canvas_bounds(
 
 def _build_defs(
     dwg: svgwrite.Drawing,
-    projected: list[tuple],
+    renders: dict[str, tuple["Image.Image", float, float]],
 ) -> dict[str, tuple[str, float, float]]:
     """Add each unique piece image to <defs> once; return label→(def_id, ax, ay)."""
     defs: dict[str, tuple[str, float, float]] = {}
-    for _, _, _, _, img, anchor_x, anchor_y, iw, ih, label in projected:
-        if label not in defs:
-            part_name  = label.split()[0]
-            short_hash = hashlib.sha256(label.encode()).hexdigest()[:8]
-            def_id     = f"{part_name}-{short_hash}"
-            buf = io.BytesIO()
-            img.save(buf, format="PNG")
-            b64 = base64.b64encode(buf.getvalue()).decode()
-            uri = f"data:image/png;base64,{b64}"
-            dwg.defs.add(dwg.image(
-                uri,
-                insert=("0px", "0px"),
-                size=(f"{iw}px", f"{ih}px"),
-                id=def_id,
-            ))
-            defs[label] = (def_id, anchor_x, anchor_y)
+    for label, (img, anchor_x, anchor_y) in renders.items():
+        part_name  = label.split()[0]
+        short_hash = hashlib.sha256(label.encode()).hexdigest()[:8]
+        def_id     = f"{part_name}-{short_hash}"
+        iw, ih     = img.size
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        b64 = base64.b64encode(buf.getvalue()).decode()
+        uri = f"data:image/png;base64,{b64}"
+        dwg.defs.add(dwg.image(
+            uri,
+            insert=("0px", "0px"),
+            size=(f"{iw}px", f"{ih}px"),
+            id=def_id,
+        ))
+        defs[label] = (def_id, anchor_x, anchor_y)
     return defs
 
 
@@ -340,6 +340,7 @@ def _inject_def_comments(output: str, defs: dict[str, tuple]) -> None:
 
 def compose_svg(
     pngs: list[tuple[Piece, Image.Image, float, float]],
+    renders: dict[str, tuple[Image.Image, float, float]],
     output: str,
     padding: int = 60,
 ) -> None:
@@ -352,7 +353,7 @@ def compose_svg(
     dwg = svgwrite.Drawing(output, size=(f"{W}px", f"{H}px"))
     dwg.add(dwg.rect((0, 0), ("100%", "100%"), fill="#f8f8f0"))
 
-    defs = _build_defs(dwg, projected)
+    defs = _build_defs(dwg, renders)
 
     for _, _, sx_px, sy_px, _, _, _, _, _, label in projected:
         def_id, ax, ay = defs[label]
@@ -369,19 +370,22 @@ def build_pngs(
     pieces: list[Piece],
     tmpdir: Path,
     keep_pngs: bool = False,
-) -> list[tuple[Piece, Image.Image, float, float]]:
-    """Render each piece to a PNG (with caching) and return (piece, img, ax, ay) tuples."""
+) -> tuple[list[tuple[Piece, Image.Image, float, float]], dict[str, tuple[Image.Image, float, float]]]:
+    """Render each piece to a PNG (with caching); return (pngs, renders).
+
+    renders maps label → (img, ax, ay) for each unique (part, color, rotation).
+    """
     pngs: list[tuple[Piece, Image.Image, float, float]] = []
-    render_cache: dict[tuple, tuple[Image.Image, float, float]] = {}
+    renders: dict[str, tuple[Image.Image, float, float]] = {}
 
     for i, piece in enumerate(pieces):
         part = PART_MAP.get(piece.part)
         if part is None:
             print(f"  [{i+1}/{len(pieces)}] Skipping unknown part: {piece.part}")
         else:
-            cache_key = (piece.part, piece.color, piece.rot.tobytes())
-            if cache_key in render_cache:
-                img, anchor_x, anchor_y = render_cache[cache_key]
+            label = _piece_label(piece)
+            if label in renders:
+                img, anchor_x, anchor_y = renders[label]
                 pngs.append((piece, img, anchor_x, anchor_y))
                 print(f"  [{i+1}/{len(pieces)}] Rendering {piece.part} (color {piece.color}) … cached")
             else:
@@ -394,7 +398,7 @@ def build_pngs(
                 ok = render_piece(scad_src, png_path)
                 if ok:
                     img, anchor_x, anchor_y = remove_and_crop(png_path)
-                    render_cache[cache_key] = (img, anchor_x, anchor_y)
+                    renders[label] = (img, anchor_x, anchor_y)
                     pngs.append((piece, img, anchor_x, anchor_y))
                     print("ok")
                     if not keep_pngs:
@@ -402,7 +406,7 @@ def build_pngs(
                 else:
                     print("FAILED — skipping")
 
-    return pngs
+    return pngs, renders
 
 
 def main() -> None:
@@ -424,13 +428,13 @@ def main() -> None:
     tmpdir = Path(tempfile.mkdtemp(prefix="ldr2png_"))
     print(f"Rendering pieces (tmpdir: {tmpdir}) …")
 
-    pngs = build_pngs(pieces, tmpdir, keep_pngs=args.keep_pngs)
+    pngs, renders = build_pngs(pieces, tmpdir, keep_pngs=args.keep_pngs)
 
     if not pngs:
         print("No pieces rendered — nothing to compose.", file=sys.stderr)
         return
 
-    compose_svg(pngs, output_path, padding=60)
+    compose_svg(pngs, renders, output_path, padding=60)
 
     if not args.keep_pngs:
         tmpdir.rmdir()

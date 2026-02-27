@@ -10,7 +10,7 @@ from unittest.mock import patch, MagicMock
 from ldr2svg.ldr2png_svg import (
     parse_ldr, _parse_ldr_line, project_ldraw, ldraw_rgb, PART_MAP,
     _project_pieces, _canvas_bounds, _build_defs, _inject_def_comments,
-    build_pngs,
+    _piece_label, build_pngs,
 )
 
 LDR_PATH = Path(__file__).parent.parent / "test.ldr"
@@ -117,6 +117,17 @@ def _make_pngs():
     ]
 
 
+def _make_renders():
+    """Unique renders dict from test.ldr with synthetic images (3 entries)."""
+    renders: dict = {}
+    for p in parse_ldr(LDR_PATH):
+        if p.part in PART_MAP:
+            label = _piece_label(p)
+            if label not in renders:
+                renders[label] = (Image.new("RGBA", (100, 80)), 50.0, 40.0)
+    return renders
+
+
 def _projected_row(sx=0.0, sy=0.0, ax=0.0, ay=0.0, iw=100, ih=80, label="test"):
     """Minimal projected tuple for _canvas_bounds testing."""
     return (0.0, 0.0, sx, sy, None, ax, ay, iw, ih, label)
@@ -157,18 +168,18 @@ class TestCanvasBounds:
 
 
 class TestBuildDefs:
-    def test_deduplicates_identical_labels(self, tmp_path):
-        """Three identical 3062a pieces → only one entry in defs."""
-        projected = _project_pieces(_make_pngs())
+    def test_one_def_per_unique_render(self, tmp_path):
+        """Three unique renders (3666, 60474, 3062a) → three defs entries."""
+        renders = _make_renders()
         dwg = svgwrite.Drawing(str(tmp_path / "t.svg"))
-        defs = _build_defs(dwg, projected)
+        defs = _build_defs(dwg, renders)
         assert len(defs) == 3   # 3666, 60474, 3062a
 
     def test_def_id_format(self, tmp_path):
         """def_id must be '{part}-{8 hex chars}'."""
-        projected = _project_pieces(_make_pngs())
+        renders = _make_renders()
         dwg = svgwrite.Drawing(str(tmp_path / "t.svg"))
-        defs = _build_defs(dwg, projected)
+        defs = _build_defs(dwg, renders)
         for label, (def_id, _, _) in defs.items():
             part = label.split()[0]
             assert def_id.startswith(f"{part}-")
@@ -177,9 +188,9 @@ class TestBuildDefs:
             assert all(c in "0123456789abcdef" for c in suffix)
 
     def test_anchors_stored(self, tmp_path):
-        projected = _project_pieces(_make_pngs())
+        renders = _make_renders()
         dwg = svgwrite.Drawing(str(tmp_path / "t.svg"))
-        defs = _build_defs(dwg, projected)
+        defs = _build_defs(dwg, renders)
         for _, (_, ax, ay) in defs.items():
             assert isinstance(ax, float)
             assert isinstance(ay, float)
@@ -214,7 +225,8 @@ class TestBuildPngs:
     def _run(self, pieces, tmp_path, keep_pngs=False):
         with patch("ldr2svg.ldr2png_svg.render_piece", return_value=True), \
              patch("ldr2svg.ldr2png_svg.remove_and_crop", side_effect=_fake_remove_and_crop):
-            return build_pngs(pieces, tmp_path, keep_pngs=keep_pngs)
+            pngs, _renders = build_pngs(pieces, tmp_path, keep_pngs=keep_pngs)
+            return pngs
 
     def test_known_parts_returned(self, tmp_path):
         pieces = [p for p in parse_ldr(LDR_PATH) if p.part in PART_MAP]
@@ -236,16 +248,25 @@ class TestBuildPngs:
         assert len(pieces) == 3
         with patch("ldr2svg.ldr2png_svg.render_piece", return_value=True) as mock_render, \
              patch("ldr2svg.ldr2png_svg.remove_and_crop", side_effect=_fake_remove_and_crop):
-            result = build_pngs(pieces, tmp_path)
-        assert len(result) == 3
+            pngs, renders = build_pngs(pieces, tmp_path)
+        assert len(pngs) == 3
         mock_render.assert_called_once()   # cached after first render
+
+    def test_renders_has_unique_entries(self, tmp_path):
+        """5-piece scene with 3 unique (part, color, rot) combos → renders has 3 entries."""
+        pieces = [p for p in parse_ldr(LDR_PATH) if p.part in PART_MAP]
+        with patch("ldr2svg.ldr2png_svg.render_piece", return_value=True), \
+             patch("ldr2svg.ldr2png_svg.remove_and_crop", side_effect=_fake_remove_and_crop):
+            pngs, renders = build_pngs(pieces, tmp_path)
+        assert len(pngs) == 5
+        assert len(renders) == 3   # 3666, 60474, 3062a (3 repeated pieces share one entry)
 
     def test_failed_render_skipped(self, tmp_path):
         pieces = [p for p in parse_ldr(LDR_PATH) if p.part in PART_MAP][:1]
         with patch("ldr2svg.ldr2png_svg.render_piece", return_value=False), \
              patch("ldr2svg.ldr2png_svg.remove_and_crop", side_effect=_fake_remove_and_crop):
-            result = build_pngs(pieces, tmp_path)
-        assert result == []
+            pngs, renders = build_pngs(pieces, tmp_path)
+        assert pngs == []
 
     def test_keep_pngs_false_removes_files(self, tmp_path):
         pieces = [p for p in parse_ldr(LDR_PATH) if p.part in PART_MAP][:1]
