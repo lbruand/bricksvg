@@ -50,15 +50,16 @@ def _project_pieces(
 def _canvas_bounds(
     projected: list[tuple],
     padding: int,
-    extra_sx_sy: list[tuple[float, float]] = (),
+    extra_sx_sy: list[tuple[float, float]] | None = None,
 ) -> tuple[int, int, float, float]:
     """Return (W, H, min_x, min_y) for the SVG canvas."""
+    extra = extra_sx_sy or []
     xs = ([sx - ax       for sx, _,  ax, _,  iw, _,  _ in projected] +
           [sx - ax + iw  for sx, _,  ax, _,  iw, _,  _ in projected] +
-          [sx for sx, _ in extra_sx_sy])
+          [sx for sx, _ in extra])
     ys = ([sy - ay       for _,  sy, _,  ay, _,  ih, _ in projected] +
           [sy - ay + ih  for _,  sy, _,  ay, _,  ih, _ in projected] +
-          [sy for _, sy in extra_sx_sy])
+          [sy for _, sy in extra])
     min_x, max_x = min(xs), max(xs)
     min_y, max_y = min(ys), max(ys)
     W = int(max_x - min_x + 2 * padding)
@@ -125,7 +126,8 @@ def compose_svg(
     dwg.add(dwg.rect((0, 0), ("100%", "100%"), fill="#f8f8f0"))
 
     if grid:
-        _draw_isometric_grid(dwg, *grid, cx, cy)
+        fy, gx0, gx1, gz0, gz1 = grid
+        _draw_isometric_grid(dwg, fy, gx0, gx1, gz0, gz1, cx, cy)
 
     defs = _build_defs(dwg, renders)
 

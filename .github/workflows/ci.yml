@@ -19,5 +19,11 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
+      - name: Lint (ruff)
+        run: uv run ruff check ldr2svg/ test/
+
+      - name: Type-check (ty)
+        run: uv run ty check ldr2svg/
+
       - name: Run tests (fast, no OpenSCAD required)
         run: uv run pytest test/ -m "not slow" -v
