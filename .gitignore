@@ -11,3 +11,4 @@ wheels/
 
 # Generated output
 *.svg
+!docs/**/*.svg
