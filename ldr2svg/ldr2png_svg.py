@@ -255,6 +255,17 @@ def parse_ldr(path: Path) -> list[Piece]:
 # ---------------------------------------------------------------------------
 # SVG composition
 # ---------------------------------------------------------------------------
+def _piece_label(piece: "Piece") -> str:
+    """Human-readable cache-key label for SVG comments."""
+    def fmt_val(v: float) -> str:
+        return f"{round(v)}" if abs(v - round(v)) < 1e-6 else f"{v:.3f}"
+    rows = "[" + ",".join(
+        "[" + ",".join(fmt_val(v) for v in row) + "]"
+        for row in piece.rot
+    ) + "]"
+    return f"{piece.part} color={piece.color} rot={rows}"
+
+
 def compose_svg(
     pngs: list[tuple[Piece, Image.Image, float, float]],
     output: str,
@@ -270,7 +281,8 @@ def compose_svg(
         sy_px  = sy * PX_PER_MM
         ldy    = float(piece.pos[1])   # LDraw Y: more negative = higher in scene
         iw, ih = img.size
-        projected.append((depth, ldy, sx_px, sy_px, img, anchor_x, anchor_y, iw, ih, piece.part))
+        label = _piece_label(piece)
+        projected.append((depth, ldy, sx_px, sy_px, img, anchor_x, anchor_y, iw, ih, label))
 
     # Canvas bounding box: each image placed so anchor aligns with projected pos
     xs = ([sx - ax       for _, _, sx, sy, img, ax, ay, iw, ih, _ in projected] +
