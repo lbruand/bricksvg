@@ -191,10 +191,8 @@ def _compute_platform_extents(
     cluster_tile_extent: dict[str, tuple[int, int, int, int]] = {}
     for d in range(max_depth + 1):
         depth_clusters = [cl for cl in cluster_objs if cluster_depth[cl["name"]] == d]
-        for cl in depth_clusters:
+        for cl in (c for c in depth_clusters if c["name"] in cluster_node_xs):
             name = cl["name"]
-            if name not in cluster_node_xs:
-                continue
             xs  = cluster_node_xs[name]
             zs  = cluster_node_zs[name]
             pad = _TILE_LDU * (max_depth - d + 2)
@@ -204,14 +202,15 @@ def _compute_platform_extents(
             z1 = math.ceil ((max(zs) + pad) / _TILE_LDU) * _TILE_LDU
 
             # Cap at midpoint to each sibling (same parent, same depth)
-            for sib in depth_clusters:
-                sib_name = sib["name"]
-                if sib_name == name or sib_name not in cluster_node_xs:
-                    continue
-                if cluster_parent[sib_name] != cluster_parent[name]:
-                    continue
-                sib_xs = cluster_node_xs[sib_name]
-                sib_zs = cluster_node_zs[sib_name]
+            siblings = [
+                sib for sib in depth_clusters
+                if sib["name"] != name
+                and sib["name"] in cluster_node_xs
+                and cluster_parent[sib["name"]] == cluster_parent[name]
+            ]
+            for sib in siblings:
+                sib_xs = cluster_node_xs[sib["name"]]
+                sib_zs = cluster_node_zs[sib["name"]]
                 if min(sib_xs) > max(xs):
                     mid = math.floor((max(xs) + min(sib_xs)) / 2 / _TILE_LDU) * _TILE_LDU
                     x1 = min(x1, mid)
@@ -237,21 +236,34 @@ def _compute_platform_extents(
     return cluster_tile_extent
 
 
+def _first_overlapping_extent(
+    ldx: int,
+    ldz: int,
+    extents: list[tuple[int, int, int, int]],
+) -> tuple[int, int, int, int] | None:
+    """Return the first platform extent whose footprint overlaps the brick, or None."""
+    return next(
+        (
+            ext for ext in extents
+            if ldx - _TILE_LDU < ext[1] and ldx + _TILE_LDU > ext[0]
+            and ldz - _TILE_LDU < ext[3] and ldz + _TILE_LDU > ext[2]
+        ),
+        None,
+    )
+
+
 def _displace_lone_nodes(
     gvid_to_ld: dict[int, tuple[int, int]],
     node_cluster: dict[int, str],
     cluster_tile_extent: dict[str, tuple[int, int, int, int]],
 ) -> None:
     """Mutate ``gvid_to_ld`` to push lone nodes outside any overlapping cluster platform."""
-    for gvid in list(gvid_to_ld):
-        if gvid in node_cluster:
-            continue  # clustered nodes sit on their platform intentionally
+    extents = list(cluster_tile_extent.values())
+    for gvid in (g for g in list(gvid_to_ld) if g not in node_cluster):
         ldx, ldz = gvid_to_ld[gvid]
-        for px0, px1, pz0, pz1 in cluster_tile_extent.values():
-            bx0, bx1 = ldx - _TILE_LDU, ldx + _TILE_LDU
-            bz0, bz1 = ldz - _TILE_LDU, ldz + _TILE_LDU
-            if not (bx0 < px1 and bx1 > px0 and bz0 < pz1 and bz1 > pz0):
-                continue
+        ext = _first_overlapping_extent(ldx, ldz, extents)
+        if ext is not None:
+            px0, px1, pz0, pz1 = ext
             dx_left  = ldx - px0
             dx_right = px1 - ldx
             dz_near  = ldz - pz0
@@ -268,7 +280,6 @@ def _displace_lone_nodes(
                     / _TILE_LDU
                 ) * _TILE_LDU
             gvid_to_ld[gvid] = (ldx, ldz)
-            break
 
 
 def _build_node_pieces(
@@ -346,10 +357,8 @@ def _build_platform_pieces(
     pieces: list[Piece] = []
     cluster_platform_tiles: dict[str, list[Piece]] = {}
 
-    for cl in cluster_objs:
+    for cl in (c for c in cluster_objs if c["name"] in cluster_tile_extent):
         name = cl["name"]
-        if name not in cluster_tile_extent:
-            continue
         x0, x1, z0, z1 = cluster_tile_extent[name]
         plate_y = float(-(cluster_depth[name] + 1) * _PLATE_H_LDU)
         color   = cluster_color.get(name, 15)
@@ -384,10 +393,8 @@ def _assemble_piece_groups(
     max_depth = max(cluster_depth.values(), default=0)
     piece_groups: list[tuple[str, list[Piece]]] = []
     for d in range(max_depth + 1):
-        for cl in cluster_objs:
+        for cl in (c for c in cluster_objs if cluster_depth[c["name"]] == d):
             name = cl["name"]
-            if cluster_depth[name] != d:
-                continue
             group = cluster_platform_tiles.get(name, []) + cluster_node_bricks.get(name, [])
             if group:
                 piece_groups.append((name, group))
