@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Add your description here"
 requires-python = ">=3.10"
 dependencies = [
+    "diagrams>=0.25.1",
     "numpy>=2.2.6",
     "pillow>=12.1.1",
     "svgwrite>=1.4.3",
@@ -24,4 +25,5 @@ dev = [
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+testpaths = ["test"]
 markers = ["slow: requires OpenSCAD (deselect with -m 'not slow')"]
