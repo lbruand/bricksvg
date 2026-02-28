@@ -197,17 +197,19 @@ def build_ldr_scene(
             "half_w":    20,   # 2×2 brick → half-side = 20 LDU
         })
 
-    # ── Step 5: cluster platform pieces (2×2 plates, stacked by depth) ────
+    # ── Step 5: cluster platform pieces (1×1 plates, stacked by depth) ────
+    # 1×1 plates (3024, tile=20 LDU) give 1-stud snap precision so each
+    # outer platform can show exactly one stud of its colour around its children.
+    #
     # Depth-d cluster → plate pos_Y = -(d+1)*PLATE_H.
     # Outermost (d=0) sits on the floor; each inner level is one plate higher.
     #
-    # Padding grows with distance from the deepest cluster so that each outer
-    # platform extends exactly one more stud beyond its immediate children:
-    #   pad = tile * (max_depth − depth + 1)
-    # → deepest: pad=40  (1 stud beyond brick edge)
-    # → one level up: pad=80 (1 stud beyond inner platform edge)
-    # → outermost: pad = tile * (max_depth + 1)
-    tile      = 40  # 40 LDU = 2 studs = one 2×2 tile width
+    # Padding formula (tile=20 LDU = 1 stud):
+    #   pad = tile × (max_depth − depth + 2)
+    # → deepest cluster:  pad = 2×tile = 40 LDU  (brick half 20 + 1 stud border)
+    # → each outer level adds one stud, so the border between adjacent levels
+    #   is exactly 1 stud.
+    tile      = 20  # 20 LDU = 1 stud = one 1×1 tile width
     max_depth = max(cluster_depth.values(), default=0)
 
     for cl in cluster_objs:
@@ -219,7 +221,7 @@ def build_ldr_scene(
         cl_zs = [gvid_to_ld[g][1] for g in cl_gvids]
 
         depth = cluster_depth[cl["name"]]
-        pad   = tile * (max_depth - depth + 1)
+        pad   = tile * (max_depth - depth + 2)
         x0s = math.floor((min(cl_xs) - pad) / tile) * tile
         x1s = math.ceil ((max(cl_xs) + pad) / tile) * tile
         z0s = math.floor((min(cl_zs) - pad) / tile) * tile
@@ -232,9 +234,9 @@ def build_ldr_scene(
         while x < x1s:
             z = z0s
             while z < z1s:
-                # Piece origin = center of 40×40 LDU tile
+                # Piece origin = centre of 20×20 LDU tile (1×1 plate)
                 pos = np.array([float(x + tile // 2), plate_y, float(z + tile // 2)])
-                pieces.append(Piece(part="3022", color=cl_c, pos=pos, rot=np.eye(3)))
+                pieces.append(Piece(part="3024", color=cl_c, pos=pos, rot=np.eye(3)))
                 z += tile
             x += tile
 

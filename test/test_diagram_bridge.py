@@ -208,7 +208,7 @@ class TestBuildLdrSceneLoneNodes:
         assert len(self.bricks) == 2
 
     def test_no_platform_plates(self):
-        assert all(p.part != "3022" for p in self.pieces)
+        assert all(p.part != "3024" for p in self.pieces)
 
     def test_lone_node_y_equals_negative_brick_height(self):
         for b in self.bricks:
@@ -236,7 +236,7 @@ class TestBuildLdrSceneCluster:
     def setup_method(self):
         self.pieces, self.arrows, self.node_data = build_ldr_scene(_cluster_graph())
         self.bricks = [p for p in self.pieces if p.part == "3003"]
-        self.plates = [p for p in self.pieces if p.part == "3022"]
+        self.plates = [p for p in self.pieces if p.part == "3024"]
 
     def test_platform_plates_exist(self):
         assert len(self.plates) > 0
@@ -263,7 +263,7 @@ class TestBuildLdrSceneCluster:
 
     def test_plates_part_number(self):
         for plate in self.plates:
-            assert plate.part == "3022"
+            assert plate.part == "3024"
 
 
 # ---------------------------------------------------------------------------
