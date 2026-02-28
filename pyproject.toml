@@ -1,8 +1,12 @@
 [project]
 name = "ldr2svg"
 version = "0.1.0"
-description = "Add your description here"
+description = "Render LDraw/.ldr scenes and diagrams-library scripts to isometric LEGO SVGs"
 requires-python = ">=3.10"
+# System dependencies (not installable via pip):
+#   openscad  — renders LEGO piece images (required for build_pngs / slow tests)
+#   graphviz  — lays out diagrams-library graphs via the 'dot' engine
+#   xvfb      — virtual display for headless OpenSCAD rendering (Linux only)
 dependencies = [
     "diagrams>=0.25.1",
     "numpy>=2.2.6",
@@ -26,4 +30,4 @@ dev = [
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["test"]
-markers = ["slow: requires OpenSCAD (deselect with -m 'not slow')"]
+markers = ["slow: requires OpenSCAD + Xvfb system dependencies (deselect with -m 'not slow')"]

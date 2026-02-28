@@ -19,8 +19,19 @@ Outputs `scene.svg` alongside the input file.
 
 ## Requirements
 
+### System dependencies
+
+| Tool | Purpose | Install |
+|------|---------|---------|
+| [OpenSCAD](https://openscad.org/) | Render LEGO piece images | `sudo apt install openscad` |
+| [Graphviz](https://graphviz.org/) | Lay out diagrams-library graphs (`dot`) | `sudo apt install graphviz` |
+| [Xvfb](https://www.x.org/releases/X11R7.6/doc/man/man1/Xvfb.1.xhtml) | Virtual display for headless OpenSCAD | `sudo apt install xvfb` |
+
+On macOS: `brew install openscad graphviz` (Xvfb not needed).
+
+### Python
+
 - Python 3.10+
-- [OpenSCAD](https://openscad.org/) (for rendering piece images)
 - [uv](https://github.com/astral-sh/uv)
 
 ## Install
@@ -32,13 +43,13 @@ uv sync
 ## Development
 
 ```bash
-uv run pytest test/ -m "not slow"   # fast unit tests
+uv run pytest test/ -m "not slow"   # fast unit tests (no OpenSCAD needed)
 uv run ruff check ldr2svg/ test/    # lint
 uv run ty check ldr2svg/            # type check
 ```
 
-Slow integration tests (require OpenSCAD):
+Slow integration tests (require OpenSCAD; use `xvfb-run` on headless systems):
 
 ```bash
-uv run pytest test/ -v
+xvfb-run uv run pytest test/ -v
 ```
