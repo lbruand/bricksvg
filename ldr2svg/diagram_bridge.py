@@ -200,7 +200,15 @@ def build_ldr_scene(
     # ── Step 5: cluster platform pieces (2×2 plates, stacked by depth) ────
     # Depth-d cluster → plate pos_Y = -(d+1)*PLATE_H.
     # Outermost (d=0) sits on the floor; each inner level is one plate higher.
-    tile = 40  # 40 LDU = 2 studs = one 2×2 tile width
+    #
+    # Padding grows with distance from the deepest cluster so that each outer
+    # platform extends exactly one more stud beyond its immediate children:
+    #   pad = tile * (max_depth − depth + 1)
+    # → deepest: pad=40  (1 stud beyond brick edge)
+    # → one level up: pad=80 (1 stud beyond inner platform edge)
+    # → outermost: pad = tile * (max_depth + 1)
+    tile      = 40  # 40 LDU = 2 studs = one 2×2 tile width
+    max_depth = max(cluster_depth.values(), default=0)
 
     for cl in cluster_objs:
         cl_gvids = [g for g in cl["nodes"] if g in gvid_to_ld]
@@ -210,13 +218,13 @@ def build_ldr_scene(
         cl_xs = [gvid_to_ld[g][0] for g in cl_gvids]
         cl_zs = [gvid_to_ld[g][1] for g in cl_gvids]
 
-        pad = 40  # 20 LDU (brick half-width) + 20 LDU (1-stud visible border)
+        depth = cluster_depth[cl["name"]]
+        pad   = tile * (max_depth - depth + 1)
         x0s = math.floor((min(cl_xs) - pad) / tile) * tile
         x1s = math.ceil ((max(cl_xs) + pad) / tile) * tile
         z0s = math.floor((min(cl_zs) - pad) / tile) * tile
         z1s = math.ceil ((max(cl_zs) + pad) / tile) * tile
 
-        depth   = cluster_depth[cl["name"]]
         plate_y = float(-(depth + 1) * _PLATE_H_LDU)
         cl_c    = cluster_color.get(cl["name"], 15)
 
