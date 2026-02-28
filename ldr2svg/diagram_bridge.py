@@ -315,6 +315,7 @@ def _build_node_pieces(
     node_data: list[dict] = []
     cluster_node_bricks: dict[str, list[Piece]] = {}
     lone_node_bricks: list[Piece] = []
+    gvid_to_mid_y: dict[int, float] = {}
 
     for obj in node_objs:
         gvid = obj["_gvid"]
@@ -339,13 +340,14 @@ def _build_node_pieces(
             "label":     obj.get("label", ""),
             "half_w":    20,
         })
+        gvid_to_mid_y[gvid] = node_y + _BRICK_H_LDU / 2
 
         if in_cluster:
             cluster_node_bricks.setdefault(node_cluster[gvid], []).append(piece)
         else:
             lone_node_bricks.append(piece)
 
-    return pieces, node_data, cluster_node_bricks, lone_node_bricks
+    return pieces, node_data, cluster_node_bricks, lone_node_bricks, gvid_to_mid_y
 
 
 def _build_platform_pieces(
@@ -411,8 +413,14 @@ def _assemble_piece_groups(
 def _build_edge_positions(
     edges: list[dict],
     gvid_to_ld: dict[int, tuple[int, int]],
+    gvid_to_mid_y: dict[int, float],
 ) -> list[tuple]:
-    """Map graphviz edges to LDraw floor-level ``(from_pos, to_pos)`` pairs."""
+    """Map graphviz edges to LDraw ``(from_pos, to_pos)`` pairs.
+
+    Each endpoint is placed at the centre of the side face of the brick that
+    faces the other node: mid-height in Y and offset by ``_TILE_LDU`` (half
+    the 2×2 brick width) along the XZ direction toward the destination.
+    """
     edge_positions: list[tuple] = []
     for e in edges:
         tail_gvid = e.get("tail")
@@ -420,9 +428,12 @@ def _build_edge_positions(
         if tail_gvid in gvid_to_ld and head_gvid in gvid_to_ld:
             tlx, tlz = gvid_to_ld[tail_gvid]
             hlx, hlz = gvid_to_ld[head_gvid]
+            dx, dz = hlx - tlx, hlz - tlz
+            dist = math.hypot(dx, dz)
+            ux, uz = (dx / dist, dz / dist) if dist > 1e-6 else (0.0, 0.0)
             edge_positions.append((
-                np.array([float(tlx), 0.0, float(tlz)]),
-                np.array([float(hlx), 0.0, float(hlz)]),
+                np.array([float(tlx) + ux * _TILE_LDU, gvid_to_mid_y[tail_gvid], float(tlz) + uz * _TILE_LDU]),
+                np.array([float(hlx) - ux * _TILE_LDU, gvid_to_mid_y[head_gvid], float(hlz) - uz * _TILE_LDU]),
             ))
     return edge_positions
 
@@ -468,7 +479,7 @@ def build_ldr_scene(
 
     _displace_lone_nodes(gvid_to_ld, node_cluster, cluster_tile_extent)
 
-    node_pieces, node_data, cluster_node_bricks, lone_node_bricks = _build_node_pieces(
+    node_pieces, node_data, cluster_node_bricks, lone_node_bricks, gvid_to_mid_y = _build_node_pieces(
         node_objs, gvid_to_ld, node_cluster, cluster_color, cluster_depth
     )
 
@@ -480,6 +491,6 @@ def build_ldr_scene(
         cluster_objs, cluster_depth, cluster_node_bricks, cluster_platform_tiles, lone_node_bricks
     )
 
-    edge_positions = _build_edge_positions(graph.get("edges", []), gvid_to_ld)
+    edge_positions = _build_edge_positions(graph.get("edges", []), gvid_to_ld, gvid_to_mid_y)
 
     return node_pieces + platform_pieces, edge_positions, node_data, piece_groups
