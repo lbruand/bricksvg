@@ -212,10 +212,10 @@ def compose_diagram_svg(
     Layer order:
     1. Background rect
     2. Isometric floor grid
-    3. Floor arrows  (before bricks → appear as ground markings)
-    4. Brick ``<use>`` elements (back-to-front)
-    5. Icons on top faces
-    6. Isometric labels
+    3. Brick ``<use>`` elements (back-to-front)
+    4. Icons on top faces
+    5. Isometric labels
+    6. Arrows (on top of everything so they are always visible)
     """
     pngs: list[tuple[Piece, int, int, float, float]] = [
         (piece, *img.size, ax, ay)
@@ -254,10 +254,7 @@ def compose_diagram_svg(
     # Arrow marker in <defs>
     _add_arrow_defs(dwg)
 
-    # 3. Floor arrows
-    _draw_floor_arrows(dwg, arrows, cx, cy)
-
-    # 4. Brick images in defs + placed instances (back-to-front, grouped by cluster)
+    # 3. Brick images in defs + placed instances (back-to-front, grouped by cluster)
     defs = _build_defs(dwg, renders)
 
     piece_proj = {
@@ -293,11 +290,14 @@ def compose_diagram_svg(
         for sx_px, sy_px, _, _, _, _, label in projected:
             _use(sx_px, sy_px, label)
 
-    # 5. Icons on top faces
+    # 4. Icons on top faces
     _draw_icons(dwg, node_data, cx, cy)
 
-    # 6. Labels
+    # 5. Labels
     _draw_labels(dwg, node_data, cx, cy)
+
+    # 6. Arrows
+    _draw_floor_arrows(dwg, arrows, cx, cy)
 
     dwg.save(pretty=True)
     print(f"Saved: {output}  ({W}×{H} px, {len(projected)} pieces)")

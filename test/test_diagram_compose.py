@@ -392,12 +392,12 @@ class TestComposeDiagramSvg:
         # Two pieces in _minimal_renders → two <use> elements
         assert len(uses) == 2
 
-    def test_layer_order_arrows_before_bricks(self, tmp_path):
-        """Arrow group must appear before brick <use> elements in SVG."""
+    def test_layer_order_arrows_after_bricks(self, tmp_path):
+        """Arrow group must appear after brick <use> elements in SVG."""
         arrows = [(_floor_pos(0), _floor_pos(80))]
         output, _ = self._run(tmp_path, arrows=arrows, name="order.svg")
         svg_text = Path(output).read_text()
-        assert svg_text.index('id="arrows"') < svg_text.index("<use")
+        assert svg_text.index('id="arrows"') > svg_text.rindex("<use")
 
     def test_layer_order_icons_after_bricks(self, tmp_path):
         """Icon group must appear after the last brick <use> element."""
