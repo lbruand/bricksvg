@@ -8,6 +8,7 @@ import pytest
 from ldr2svg.diagram_bridge import (
     extract_graph,
     build_ldr_scene,
+    TileExtent,
     _provider_color,
     _median_nn_dist,
     _PLATE_H_LDU,
@@ -659,18 +660,19 @@ class TestComputePlatformExtents:
         assert "cluster_A" in _compute_platform_extents(*self._single())
 
     def test_extent_covers_member_node(self):
-        x0, x1, z0, z1 = _compute_platform_extents(*self._single())["cluster_A"]
-        assert x0 <= 0 <= x1
-        assert z0 <= 0 <= z1
+        ext = _compute_platform_extents(*self._single())["cluster_A"]
+        assert ext.x0 <= 0 <= ext.x1
+        assert ext.z0 <= 0 <= ext.z1
 
     def test_extent_has_padding(self):
         # depth=0, max_depth=0 → pad = tile*(0−0+2) = 40 LDU
-        x0, x1, z0, z1 = _compute_platform_extents(*self._single())["cluster_A"]
-        assert x0 <= -40
-        assert x1 >= 40
+        ext = _compute_platform_extents(*self._single())["cluster_A"]
+        assert ext.x0 <= -40
+        assert ext.x1 >= 40
 
     def test_extent_snapped_to_tile_grid(self):
-        for v in _compute_platform_extents(*self._single())["cluster_A"]:
+        ext = _compute_platform_extents(*self._single())["cluster_A"]
+        for v in (ext.x0, ext.x1, ext.z0, ext.z1):
             assert v % _TILE_LDU == 0
 
     def test_cluster_with_no_positioned_members_omitted(self):
@@ -691,7 +693,7 @@ class TestComputePlatformExtents:
         cluster_parent = {"cluster_A": None, "cluster_B": None}
         result = _compute_platform_extents(cluster_objs, gvid_to_ld, cluster_depth, cluster_parent)
         # A is left of B: A's right edge must not exceed B's left edge
-        assert result["cluster_A"][1] <= result["cluster_B"][0]
+        assert result["cluster_A"].x1 <= result["cluster_B"].x0
 
     def test_child_extent_within_parent(self):
         cluster_objs = [
@@ -702,10 +704,10 @@ class TestComputePlatformExtents:
         cluster_depth  = {"cluster_A": 0, "cluster_B": 1}
         cluster_parent = {"cluster_A": None, "cluster_B": "cluster_A"}
         result = _compute_platform_extents(cluster_objs, gvid_to_ld, cluster_depth, cluster_parent)
-        ax0, ax1, az0, az1 = result["cluster_A"]
-        bx0, bx1, bz0, bz1 = result["cluster_B"]
-        assert bx0 >= ax0 and bx1 <= ax1
-        assert bz0 >= az0 and bz1 <= az1
+        a = result["cluster_A"]
+        b = result["cluster_B"]
+        assert b.x0 >= a.x0 and b.x1 <= a.x1
+        assert b.z0 >= a.z0 and b.z1 <= a.z1
 
 
 # ---------------------------------------------------------------------------
@@ -715,12 +717,12 @@ class TestComputePlatformExtents:
 class TestDisplaceLoneNodes:
     def test_lone_node_inside_platform_is_moved(self):
         gvid_to_ld = {0: (0, 0)}
-        _displace_lone_nodes(gvid_to_ld, {}, {"c": (-40, 40, -40, 40)})
+        _displace_lone_nodes(gvid_to_ld, {}, {"c": TileExtent(-40, 40, -40, 40)})
         assert gvid_to_ld[0] != (0, 0)
 
     def test_displaced_node_no_longer_overlaps(self):
         gvid_to_ld = {0: (0, 0)}
-        _displace_lone_nodes(gvid_to_ld, {}, {"c": (-40, 40, -40, 40)})
+        _displace_lone_nodes(gvid_to_ld, {}, {"c": TileExtent(-40, 40, -40, 40)})
         ldx, ldz = gvid_to_ld[0]
         bx0, bx1 = ldx - _TILE_LDU, ldx + _TILE_LDU
         bz0, bz1 = ldz - _TILE_LDU, ldz + _TILE_LDU
@@ -728,17 +730,17 @@ class TestDisplaceLoneNodes:
 
     def test_clustered_node_not_displaced(self):
         gvid_to_ld = {0: (0, 0)}
-        _displace_lone_nodes(gvid_to_ld, {0: "cluster_A"}, {"cluster_A": (-40, 40, -40, 40)})
+        _displace_lone_nodes(gvid_to_ld, {0: "cluster_A"}, {"cluster_A": TileExtent(-40, 40, -40, 40)})
         assert gvid_to_ld[0] == (0, 0)
 
     def test_non_overlapping_lone_node_unchanged(self):
         gvid_to_ld = {0: (200, 0)}
-        _displace_lone_nodes(gvid_to_ld, {}, {"c": (-40, 40, -40, 40)})
+        _displace_lone_nodes(gvid_to_ld, {}, {"c": TileExtent(-40, 40, -40, 40)})
         assert gvid_to_ld[0] == (200, 0)
 
     def test_result_snapped_to_tile_grid(self):
         gvid_to_ld = {0: (0, 0)}
-        _displace_lone_nodes(gvid_to_ld, {}, {"c": (-40, 40, -40, 40)})
+        _displace_lone_nodes(gvid_to_ld, {}, {"c": TileExtent(-40, 40, -40, 40)})
         ldx, ldz = gvid_to_ld[0]
         assert ldx % _TILE_LDU == 0
         assert ldz % _TILE_LDU == 0
@@ -802,7 +804,7 @@ class TestBuildNodePieces:
 class TestBuildPlatformPieces:
     def _inputs(self):
         cluster_objs        = [{"_gvid": 0, "nodes": [1], "name": "cluster_A"}]
-        cluster_tile_extent = {"cluster_A": (0, 40, 0, 40)}
+        cluster_tile_extent = {"cluster_A": TileExtent(0, 40, 0, 40)}
         cluster_depth       = {"cluster_A": 0}
         cluster_color       = {"cluster_A": 1}
         return cluster_objs, cluster_tile_extent, cluster_depth, cluster_color
@@ -823,7 +825,7 @@ class TestBuildPlatformPieces:
 
     def test_plate_y_depth_1(self):
         cluster_objs        = [{"_gvid": 0, "nodes": [1], "name": "cluster_B"}]
-        cluster_tile_extent = {"cluster_B": (0, 20, 0, 20)}
+        cluster_tile_extent = {"cluster_B": TileExtent(0, 20, 0, 20)}
         cluster_depth       = {"cluster_B": 1}
         cluster_color       = {"cluster_B": 4}
         pieces, _ = _build_platform_pieces(cluster_objs, cluster_tile_extent, cluster_depth, cluster_color)
@@ -957,22 +959,22 @@ class TestFirstOverlappingExtent:
 
     def test_non_overlapping_returns_none(self):
         # brick at (200,0), platform at (-40,40,-40,40) — far apart
-        assert _first_overlapping_extent(200, 0, [(-40, 40, -40, 40)]) is None
+        assert _first_overlapping_extent(200, 0, [TileExtent(-40, 40, -40, 40)]) is None
 
     def test_overlapping_returns_extent(self):
-        ext = (-40, 40, -40, 40)
+        ext = TileExtent(-40, 40, -40, 40)
         assert _first_overlapping_extent(0, 0, [ext]) == ext
 
     def test_just_touching_not_overlapping(self):
         # brick right edge at ldx+TILE=40, platform left edge at 40 → strict inequality fails
-        assert _first_overlapping_extent(20, 0, [(40, 80, -40, 40)]) is None
+        assert _first_overlapping_extent(20, 0, [TileExtent(40, 80, -40, 40)]) is None
 
     def test_returns_first_of_multiple(self):
-        ext1 = (-40, 40, -40, 40)
-        ext2 = (-60, 60, -60, 60)
+        ext1 = TileExtent(-40, 40, -40, 40)
+        ext2 = TileExtent(-60, 60, -60, 60)
         assert _first_overlapping_extent(0, 0, [ext1, ext2]) is ext1
 
     def test_z_axis_overlap_detected(self):
         # brick at (200, 0) overlaps z-wise with platform (180, 220, -40, 40)
-        ext = (180, 220, -40, 40)
+        ext = TileExtent(180, 220, -40, 40)
         assert _first_overlapping_extent(200, 0, [ext]) == ext

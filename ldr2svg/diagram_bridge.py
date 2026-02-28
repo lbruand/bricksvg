@@ -4,6 +4,7 @@ import json
 import math
 import runpy
 import statistics
+from dataclasses import dataclass
 
 import numpy as np
 import diagrams
@@ -52,6 +53,15 @@ _CLUSTER_PALETTE = [1, 4, 2, 25, 41, 22]
 _PLATE_H_LDU = 8   # height of a 1×1 plate (3024, height = 1/3 brick)
 _BRICK_H_LDU = 24  # height of a 2×2 brick (3003, height = 1 brick)
 _TILE_LDU    = 20  # one stud = one 1×1 tile width
+
+
+@dataclass
+class TileExtent:
+    """Axis-aligned XZ bounding box (in LDU) of a cluster platform."""
+    x0: int
+    x1: int
+    z0: int
+    z1: int
 
 
 # ---------------------------------------------------------------------------
@@ -170,8 +180,8 @@ def _compute_platform_extents(
     gvid_to_ld: dict[int, tuple[int, int]],
     cluster_depth: dict[str, int],
     cluster_parent: dict[str, str | None],
-) -> dict[str, tuple[int, int, int, int]]:
-    """Return sibling-bounded, parent-clipped XZ extents ``(x0,x1,z0,z1)`` per cluster.
+) -> dict[str, TileExtent]:
+    """Return sibling-bounded, parent-clipped XZ extents per cluster.
 
     Processes outermost clusters first so parent extents exist when children
     are clipped.  Additionally caps each cluster's extent at the midpoint to
@@ -188,7 +198,7 @@ def _compute_platform_extents(
             cluster_node_xs[cl["name"]] = [gvid_to_ld[g][0] for g in members]
             cluster_node_zs[cl["name"]] = [gvid_to_ld[g][1] for g in members]
 
-    cluster_tile_extent: dict[str, tuple[int, int, int, int]] = {}
+    cluster_tile_extent: dict[str, TileExtent] = {}
     for d in range(max_depth + 1):
         depth_clusters = [cl for cl in cluster_objs if cluster_depth[cl["name"]] == d]
         for cl in (c for c in depth_clusters if c["name"] in cluster_node_xs):
@@ -227,11 +237,11 @@ def _compute_platform_extents(
             # Clip to parent's already-computed extent
             parent = cluster_parent[name]
             if parent and parent in cluster_tile_extent:
-                px0, px1, pz0, pz1 = cluster_tile_extent[parent]
-                x0, x1 = max(x0, px0), min(x1, px1)
-                z0, z1 = max(z0, pz0), min(z1, pz1)
+                pe = cluster_tile_extent[parent]
+                x0, x1 = max(x0, pe.x0), min(x1, pe.x1)
+                z0, z1 = max(z0, pe.z0), min(z1, pe.z1)
 
-            cluster_tile_extent[name] = (x0, x1, z0, z1)
+            cluster_tile_extent[name] = TileExtent(x0, x1, z0, z1)
 
     return cluster_tile_extent
 
@@ -239,14 +249,14 @@ def _compute_platform_extents(
 def _first_overlapping_extent(
     ldx: int,
     ldz: int,
-    extents: list[tuple[int, int, int, int]],
-) -> tuple[int, int, int, int] | None:
+    extents: list[TileExtent],
+) -> TileExtent | None:
     """Return the first platform extent whose footprint overlaps the brick, or None."""
     return next(
         (
             ext for ext in extents
-            if ldx - _TILE_LDU < ext[1] and ldx + _TILE_LDU > ext[0]
-            and ldz - _TILE_LDU < ext[3] and ldz + _TILE_LDU > ext[2]
+            if ldx - _TILE_LDU < ext.x1 and ldx + _TILE_LDU > ext.x0
+            and ldz - _TILE_LDU < ext.z1 and ldz + _TILE_LDU > ext.z0
         ),
         None,
     )
@@ -255,7 +265,7 @@ def _first_overlapping_extent(
 def _displace_lone_nodes(
     gvid_to_ld: dict[int, tuple[int, int]],
     node_cluster: dict[int, str],
-    cluster_tile_extent: dict[str, tuple[int, int, int, int]],
+    cluster_tile_extent: dict[str, TileExtent],
 ) -> None:
     """Mutate ``gvid_to_ld`` to push lone nodes outside any overlapping cluster platform."""
     extents = list(cluster_tile_extent.values())
@@ -263,20 +273,19 @@ def _displace_lone_nodes(
         ldx, ldz = gvid_to_ld[gvid]
         ext = _first_overlapping_extent(ldx, ldz, extents)
         if ext is not None:
-            px0, px1, pz0, pz1 = ext
-            dx_left  = ldx - px0
-            dx_right = px1 - ldx
-            dz_near  = ldz - pz0
-            dz_far   = pz1 - ldz
+            dx_left  = ldx - ext.x0
+            dx_right = ext.x1 - ldx
+            dz_near  = ldz - ext.z0
+            dz_far   = ext.z1 - ldz
             clearance = 2 * _TILE_LDU  # brick half + 1-stud gap
             if min(dx_left, dx_right) <= min(dz_near, dz_far):
                 ldx = round(
-                    (px0 - clearance if dx_left <= dx_right else px1 + clearance)
+                    (ext.x0 - clearance if dx_left <= dx_right else ext.x1 + clearance)
                     / _TILE_LDU
                 ) * _TILE_LDU
             else:
                 ldz = round(
-                    (pz0 - clearance if dz_near <= dz_far else pz1 + clearance)
+                    (ext.z0 - clearance if dz_near <= dz_far else ext.z1 + clearance)
                     / _TILE_LDU
                 ) * _TILE_LDU
             gvid_to_ld[gvid] = (ldx, ldz)
@@ -341,7 +350,7 @@ def _build_node_pieces(
 
 def _build_platform_pieces(
     cluster_objs: list[dict],
-    cluster_tile_extent: dict[str, tuple[int, int, int, int]],
+    cluster_tile_extent: dict[str, TileExtent],
     cluster_depth: dict[str, int],
     cluster_color: dict[str, int],
 ) -> tuple[list[Piece], dict[str, list[Piece]]]:
@@ -359,12 +368,12 @@ def _build_platform_pieces(
 
     for cl in (c for c in cluster_objs if c["name"] in cluster_tile_extent):
         name = cl["name"]
-        x0, x1, z0, z1 = cluster_tile_extent[name]
+        ext  = cluster_tile_extent[name]
         plate_y = float(-(cluster_depth[name] + 1) * _PLATE_H_LDU)
         color   = cluster_color.get(name, 15)
 
-        for x in range(x0, x1, _TILE_LDU):
-            for z in range(z0, z1, _TILE_LDU):
+        for x in range(ext.x0, ext.x1, _TILE_LDU):
+            for z in range(ext.z0, ext.z1, _TILE_LDU):
                 pos = np.array([float(x + _TILE_LDU // 2), plate_y, float(z + _TILE_LDU // 2)])
                 piece = Piece(part="3024", color=color, pos=pos, rot=np.eye(3))
                 pieces.append(piece)
