@@ -210,7 +210,7 @@ def build_ldr_scene(
         cl_xs = [gvid_to_ld[g][0] for g in cl_gvids]
         cl_zs = [gvid_to_ld[g][1] for g in cl_gvids]
 
-        pad = 20  # 20 LDU padding on each side
+        pad = 40  # 20 LDU (brick half-width) + 20 LDU (1-stud visible border)
         x0s = math.floor((min(cl_xs) - pad) / tile) * tile
         x1s = math.ceil ((max(cl_xs) + pad) / tile) * tile
         z0s = math.floor((min(cl_zs) - pad) / tile) * tile
