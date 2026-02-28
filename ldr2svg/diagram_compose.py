@@ -45,6 +45,32 @@ def _add_arrow_defs(dwg: svgwrite.Drawing) -> None:
     dwg.defs.add(marker)
 
 
+def _make_floor_arrow(
+    dwg: svgwrite.Drawing,
+    from_pos: np.ndarray,
+    to_pos: np.ndarray,
+    cx,
+    cy,
+    shorten_px: float,
+):
+    """Return a shortened SVG line for one arrow, or None if the endpoints coincide."""
+    x0, y0 = _proj_canvas(from_pos, cx, cy)
+    x1, y1 = _proj_canvas(to_pos,   cx, cy)
+    dx, dy = x1 - x0, y1 - y0
+    length = math.hypot(dx, dy)
+    if length < 1e-6:
+        return None
+    ux, uy = dx / length, dy / length
+    line = dwg.line(
+        start=(f"{x0:.1f}", f"{y0:.1f}"),
+        end=(f"{x1 - ux * shorten_px:.1f}", f"{y1 - uy * shorten_px:.1f}"),
+        stroke="#888",
+        stroke_width="1.5",
+    )
+    line.attribs["marker-end"] = "url(#arrow)"
+    return line
+
+
 def _draw_floor_arrows(
     dwg: svgwrite.Drawing,
     arrows: list[tuple],
@@ -54,24 +80,9 @@ def _draw_floor_arrows(
 ) -> None:
     """Draw directed floor arrows connecting nodes."""
     grp = dwg.g(id="arrows")
-    for from_pos, to_pos in arrows:
-        x0, y0 = _proj_canvas(from_pos, cx, cy)
-        x1, y1 = _proj_canvas(to_pos,   cx, cy)
-        dx, dy = x1 - x0, y1 - y0
-        length = math.hypot(dx, dy)
-        if length < 1e-6:
-            continue
-        ux, uy = dx / length, dy / length
-        # Shorten at the head end to avoid overlapping the destination brick
-        x1s = x1 - ux * shorten_px
-        y1s = y1 - uy * shorten_px
-        line = dwg.line(
-            start=(f"{x0:.1f}", f"{y0:.1f}"),
-            end=(f"{x1s:.1f}", f"{y1s:.1f}"),
-            stroke="#888",
-            stroke_width="1.5",
-        )
-        line.attribs["marker-end"] = "url(#arrow)"
+    lines = filter(None, (_make_floor_arrow(dwg, fp, tp, cx, cy, shorten_px)
+                          for fp, tp in arrows))
+    for line in lines:
         grp.add(line)
     dwg.add(grp)
 
@@ -79,6 +90,56 @@ def _draw_floor_arrows(
 # ---------------------------------------------------------------------------
 # Icon overlay
 # ---------------------------------------------------------------------------
+
+def _load_icon(icon_path: str | None) -> Image.Image | None:
+    """Load an icon image and return it, or None if missing, unreadable, or empty."""
+    if not icon_path:
+        return None
+    try:
+        icon = Image.open(icon_path).convert("RGBA")
+    except Exception:
+        return None
+    W, H = icon.size
+    return icon if W > 0 and H > 0 else None
+
+
+def _icon_element(
+    dwg: svgwrite.Drawing,
+    icon: Image.Image,
+    nd: dict,
+    cx,
+    cy,
+):
+    """Build the affine-transformed SVG <image> element for one node icon."""
+    W, H = icon.size
+    pos   = nd["pos"]
+    hw    = nd["half_w"]
+    ldx   = float(pos[0])
+    top_y = float(pos[1])
+    ldz   = float(pos[2])
+
+    # Top-face corners in LDraw (Y = top of brick)
+    A = np.array([ldx - hw, top_y, ldz - hw])   # back-left
+    B = np.array([ldx + hw, top_y, ldz - hw])   # back-right
+    D = np.array([ldx - hw, top_y, ldz + hw])   # front-left
+
+    ax, ay = _proj_canvas(A, cx, cy)
+    bx, by = _proj_canvas(B, cx, cy)
+    dx, dy = _proj_canvas(D, cx, cy)
+
+    # Affine: image (0,0)→A, (W,0)→B, (0,H)→D
+    buf = io.BytesIO()
+    icon.save(buf, format="PNG")
+    uri = f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode()}"
+
+    img_el = dwg.image(uri, insert=("0px", "0px"), size=(f"{W}px", f"{H}px"))
+    img_el.attribs["preserveAspectRatio"] = "none"
+    img_el.attribs["transform"] = (
+        f"matrix({(bx-ax)/W:.6f},{(by-ay)/W:.6f},"
+        f"{(dx-ax)/H:.6f},{(dy-ay)/H:.6f},{ax:.2f},{ay:.2f})"
+    )
+    return img_el
+
 
 def _draw_icons(
     dwg: svgwrite.Drawing,
@@ -93,50 +154,9 @@ def _draw_icons(
     """
     grp = dwg.g(id="icons")
     for nd in node_data:
-        icon_path = nd.get("icon_path")
-        if not icon_path:
-            continue
-        try:
-            icon = Image.open(icon_path).convert("RGBA")
-        except Exception:
-            continue
-        W, H = icon.size
-        if W == 0 or H == 0:
-            continue
-
-        pos  = nd["pos"]
-        hw   = nd["half_w"]
-        ldx  = float(pos[0])
-        top_y = float(pos[1])   # top-face Y in LDraw
-        ldz  = float(pos[2])
-
-        # Top-face corners in LDraw (Y = top of brick)
-        A = np.array([ldx - hw, top_y, ldz - hw])   # back-left
-        B = np.array([ldx + hw, top_y, ldz - hw])   # back-right
-        D = np.array([ldx - hw, top_y, ldz + hw])   # front-left
-
-        ax, ay = _proj_canvas(A, cx, cy)
-        bx, by = _proj_canvas(B, cx, cy)
-        dx, dy = _proj_canvas(D, cx, cy)
-
-        # Affine: image (0,0)→A, (W,0)→B, (0,H)→D
-        ma = (bx - ax) / W
-        mb = (by - ay) / W
-        mc = (dx - ax) / H
-        md = (dy - ay) / H
-        me = ax
-        mf = ay
-
-        buf = io.BytesIO()
-        icon.save(buf, format="PNG")
-        uri = f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode()}"
-
-        img_el = dwg.image(uri, insert=("0px", "0px"), size=(f"{W}px", f"{H}px"))
-        img_el.attribs["preserveAspectRatio"] = "none"
-        img_el.attribs["transform"] = (
-            f"matrix({ma:.6f},{mb:.6f},{mc:.6f},{md:.6f},{me:.2f},{mf:.2f})"
-        )
-        grp.add(img_el)
+        icon = _load_icon(nd.get("icon_path"))
+        if icon is not None:
+            grp.add(_icon_element(dwg, icon, nd, cx, cy))
     dwg.add(grp)
 
 
@@ -152,21 +172,17 @@ def _draw_labels(
 ) -> None:
     """Draw isometric-skewed text labels at the front-floor foot of each brick."""
     grp = dwg.g(id="labels")
-    for nd in node_data:
-        label = nd.get("label", "")
-        if not label:
-            continue
+    for nd in (n for n in node_data if n.get("label", "")):
         pos = nd["pos"]
         hw  = nd["half_w"]
         ldx = float(pos[0])
         ldz = float(pos[2])
 
         # Anchor: front-floor corner of the brick (at floor Y=0)
-        anchor = np.array([ldx, 0.0, ldz + hw])
-        lx, ly = _proj_canvas(anchor, cx, cy)
+        lx, ly = _proj_canvas(np.array([ldx, 0.0, ldz + hw]), cx, cy)
 
         text_el = dwg.text(
-            label,
+            nd["label"],
             insert=(0, 0),
             font_size="9",
             fill="#333",
@@ -211,12 +227,12 @@ def compose_diagram_svg(
     grid = _grid_params(renders)
     grid_corners = _grid_corner_sx_sy(*grid) if grid else []
 
-    # Include floor-arrow endpoints in the canvas bounds calculation
-    extra_pts: list[tuple[float, float]] = []
-    for from_pos, to_pos in arrows:
-        for p in (from_pos, to_pos):
-            sx, sy, _ = project_ldraw(p)
-            extra_pts.append((sx * PX_PER_MM, sy * PX_PER_MM))
+    extra_pts = [
+        (sx * PX_PER_MM, sy * PX_PER_MM)
+        for from_pos, to_pos in arrows
+        for p in (from_pos, to_pos)
+        for sx, sy, _ in (project_ldraw(p),)
+    ]
 
     W, H, min_x, min_y = _canvas_bounds(
         projected, padding, extra_sx_sy=grid_corners + extra_pts
@@ -244,11 +260,10 @@ def compose_diagram_svg(
     # 4. Brick images in defs + placed instances (back-to-front, grouped by cluster)
     defs = _build_defs(dwg, renders)
 
-    # Build a per-piece projection lookup so groups can sort independently.
-    piece_proj: dict[int, tuple] = {}
-    for piece, iw, ih, ax, ay in pngs:
-        piece_proj[id(piece)] = _project_piece(piece, iw, ih, ax, ay)
-        # returns (depth, ldy, sx_px, sy_px, ax, ay, iw, ih, label)
+    piece_proj = {
+        id(piece): _project_piece(piece, iw, ih, ax, ay)
+        for piece, iw, ih, ax, ay in pngs
+    }
 
     def _use(sx_px: float, sy_px: float, label: str) -> None:
         def_id, dax, day = defs[label]
@@ -267,8 +282,10 @@ def compose_diagram_svg(
     if piece_groups is not None:
         for group_name, group_pieces in piece_groups:
             grp = dwg.g(id=group_name)
-            rows = [piece_proj[id(p)] for p in group_pieces if id(p) in piece_proj]
-            rows.sort(key=lambda r: (-r[1], r[0]))  # -ldy then cam_depth
+            rows = sorted(
+                [piece_proj[id(p)] for p in group_pieces if id(p) in piece_proj],
+                key=lambda r: (-r[1], r[0]),
+            )
             for depth, ldy, sx_px, sy_px, _ax, _ay, iw, ih, label in rows:
                 _use_in(grp, sx_px, sy_px, label)
             dwg.add(grp)
