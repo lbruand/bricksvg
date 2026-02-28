@@ -12,7 +12,18 @@ from ldr2svg.diagram_bridge import (
     _median_nn_dist,
     _PLATE_H_LDU,
     _BRICK_H_LDU,
+    _TILE_LDU,
+    _parse_objects,
+    _compute_cluster_metadata,
+    _layout_positions,
+    _compute_platform_extents,
+    _displace_lone_nodes,
+    _build_node_pieces,
+    _build_platform_pieces,
+    _assemble_piece_groups,
+    _build_edge_positions,
 )
+from ldr2svg.parts import Piece
 
 EXAMPLE_DIAGRAM = Path(__file__).parent / "example_diagram.py"
 
@@ -488,3 +499,447 @@ class TestPieceGroups:
         pieces, _, _, piece_groups = build_ldr_scene(_cluster_graph())
         grouped = {id(p) for _, grp in piece_groups for p in grp}
         assert all(id(p) in grouped for p in pieces)
+
+
+# ---------------------------------------------------------------------------
+# Step: _parse_objects
+# ---------------------------------------------------------------------------
+
+class TestParseObjects:
+    def test_splits_nodes_and_clusters(self):
+        graph = {"objects": [
+            {"_gvid": 0, "nodes": [1], "name": "cluster_A"},
+            {"_gvid": 1, "pos": "0,0", "label": "x"},
+        ]}
+        node_objs, cluster_objs = _parse_objects(graph)
+        assert len(node_objs) == 1
+        assert len(cluster_objs) == 1
+
+    def test_empty_objects(self):
+        node_objs, cluster_objs = _parse_objects({"objects": []})
+        assert node_objs == []
+        assert cluster_objs == []
+
+    def test_only_nodes(self):
+        node_objs, cluster_objs = _parse_objects({"objects": [{"_gvid": 0, "pos": "0,0"}]})
+        assert len(node_objs) == 1
+        assert cluster_objs == []
+
+    def test_only_clusters(self):
+        node_objs, cluster_objs = _parse_objects({"objects": [{"_gvid": 0, "nodes": [1], "name": "c"}]})
+        assert node_objs == []
+        assert len(cluster_objs) == 1
+
+    def test_missing_objects_key(self):
+        node_objs, cluster_objs = _parse_objects({})
+        assert node_objs == []
+        assert cluster_objs == []
+
+
+# ---------------------------------------------------------------------------
+# Step: _compute_cluster_metadata
+# ---------------------------------------------------------------------------
+
+class TestComputeClusterMetadata:
+    def _lone_inputs(self):
+        return [{"_gvid": 0, "pos": "0,0"}, {"_gvid": 1, "pos": "155,0"}], []
+
+    def _cluster_inputs(self):
+        node_objs = [{"_gvid": 1, "pos": "0,0"}, {"_gvid": 2, "pos": "155,0"}]
+        cluster_objs = [{"_gvid": 0, "nodes": [1], "name": "cluster_A"}]
+        return node_objs, cluster_objs
+
+    def _nested_inputs(self):
+        node_objs = [{"_gvid": 2, "pos": "0,0"}, {"_gvid": 3, "pos": "155,0"}]
+        cluster_objs = [
+            {"_gvid": 0, "nodes": [2, 3], "name": "cluster_A"},
+            {"_gvid": 1, "nodes": [2],    "name": "cluster_B"},
+        ]
+        return node_objs, cluster_objs
+
+    def test_lone_nodes_not_in_node_cluster(self):
+        node_cluster, _, _, _ = _compute_cluster_metadata(*self._lone_inputs())
+        assert node_cluster == {}
+
+    def test_node_mapped_to_cluster(self):
+        node_cluster, _, _, _ = _compute_cluster_metadata(*self._cluster_inputs())
+        assert node_cluster[1] == "cluster_A"
+
+    def test_lone_node_not_mapped(self):
+        node_cluster, _, _, _ = _compute_cluster_metadata(*self._cluster_inputs())
+        assert 2 not in node_cluster
+
+    def test_node_mapped_to_innermost_cluster(self):
+        # gvid 2 is in cluster_A and cluster_B; cluster_B (size=1) wins
+        node_cluster, _, _, _ = _compute_cluster_metadata(*self._nested_inputs())
+        assert node_cluster[2] == "cluster_B"
+
+    def test_cluster_color_assigned(self):
+        _, cluster_color, _, _ = _compute_cluster_metadata(*self._cluster_inputs())
+        assert "cluster_A" in cluster_color
+
+    def test_two_clusters_get_different_colors(self):
+        _, cluster_color, _, _ = _compute_cluster_metadata(*self._nested_inputs())
+        assert cluster_color["cluster_A"] != cluster_color["cluster_B"]
+
+    def test_outermost_cluster_depth_zero(self):
+        _, _, cluster_depth, _ = _compute_cluster_metadata(*self._nested_inputs())
+        assert cluster_depth["cluster_A"] == 0
+
+    def test_inner_cluster_depth_one(self):
+        _, _, cluster_depth, _ = _compute_cluster_metadata(*self._nested_inputs())
+        assert cluster_depth["cluster_B"] == 1
+
+    def test_root_cluster_parent_is_none(self):
+        _, _, _, cluster_parent = _compute_cluster_metadata(*self._cluster_inputs())
+        assert cluster_parent["cluster_A"] is None
+
+    def test_child_cluster_parent_is_outer(self):
+        _, _, _, cluster_parent = _compute_cluster_metadata(*self._nested_inputs())
+        assert cluster_parent["cluster_B"] == "cluster_A"
+
+
+# ---------------------------------------------------------------------------
+# Step: _layout_positions
+# ---------------------------------------------------------------------------
+
+class TestLayoutPositions:
+    def test_returns_gvid_keys(self):
+        node_objs = [{"_gvid": 5, "pos": "0,0"}, {"_gvid": 7, "pos": "80,0"}]
+        result = _layout_positions(node_objs)
+        assert set(result.keys()) == {5, 7}
+
+    def test_positions_snapped_to_tile_grid(self):
+        node_objs = [{"_gvid": 0, "pos": "0,0"}, {"_gvid": 1, "pos": "80,0"}]
+        result = _layout_positions(node_objs)
+        for ldx, ldz in result.values():
+            assert ldx % _TILE_LDU == 0
+            assert ldz % _TILE_LDU == 0
+
+    def test_origin_stays_at_zero(self):
+        node_objs = [{"_gvid": 0, "pos": "0,0"}, {"_gvid": 1, "pos": "155,0"}]
+        result = _layout_positions(node_objs)
+        assert result[0] == (0, 0)
+
+    def test_scale_separates_nodes_by_80ldu(self):
+        # Two nodes 155 gv-points apart → scale=80/155 → separation = 80 LDU
+        node_objs = [{"_gvid": 0, "pos": "0,0"}, {"_gvid": 1, "pos": "155,0"}]
+        result = _layout_positions(node_objs)
+        assert result[1][0] == 80
+
+    def test_graphviz_y_negated_to_ldraw_z(self):
+        # Positive graphviz Y (up) → negative LDraw Z (away from viewer)
+        node_objs = [{"_gvid": 0, "pos": "0,0"}, {"_gvid": 1, "pos": "0,155"}]
+        result = _layout_positions(node_objs)
+        assert result[1][1] < 0
+
+    def test_single_node_snapped_to_grid(self):
+        # With one node, nn_dist falls back to 1.0 → scale=80; still snaps to tile grid
+        node_objs = [{"_gvid": 0, "pos": "42,17"}]
+        result = _layout_positions(node_objs)
+        ldx, ldz = result[0]
+        assert ldx % _TILE_LDU == 0
+        assert ldz % _TILE_LDU == 0
+
+
+# ---------------------------------------------------------------------------
+# Step: _compute_platform_extents
+# ---------------------------------------------------------------------------
+
+class TestComputePlatformExtents:
+    def _single(self):
+        cluster_objs  = [{"_gvid": 0, "nodes": [1], "name": "cluster_A"}]
+        gvid_to_ld    = {1: (0, 0)}
+        cluster_depth  = {"cluster_A": 0}
+        cluster_parent = {"cluster_A": None}
+        return cluster_objs, gvid_to_ld, cluster_depth, cluster_parent
+
+    def test_cluster_in_result(self):
+        assert "cluster_A" in _compute_platform_extents(*self._single())
+
+    def test_extent_covers_member_node(self):
+        x0, x1, z0, z1 = _compute_platform_extents(*self._single())["cluster_A"]
+        assert x0 <= 0 <= x1
+        assert z0 <= 0 <= z1
+
+    def test_extent_has_padding(self):
+        # depth=0, max_depth=0 → pad = tile*(0−0+2) = 40 LDU
+        x0, x1, z0, z1 = _compute_platform_extents(*self._single())["cluster_A"]
+        assert x0 <= -40
+        assert x1 >= 40
+
+    def test_extent_snapped_to_tile_grid(self):
+        for v in _compute_platform_extents(*self._single())["cluster_A"]:
+            assert v % _TILE_LDU == 0
+
+    def test_cluster_with_no_positioned_members_omitted(self):
+        cluster_objs  = [{"_gvid": 0, "nodes": [99], "name": "cluster_A"}]
+        result = _compute_platform_extents(
+            cluster_objs, {}, {"cluster_A": 0}, {"cluster_A": None}
+        )
+        assert "cluster_A" not in result
+
+    def test_sibling_extents_do_not_overlap(self):
+        # Two sibling clusters, nodes far apart; their platforms must not overlap
+        cluster_objs = [
+            {"_gvid": 0, "nodes": [2], "name": "cluster_A"},
+            {"_gvid": 1, "nodes": [3], "name": "cluster_B"},
+        ]
+        gvid_to_ld    = {2: (0, 0), 3: (160, 0)}
+        cluster_depth  = {"cluster_A": 0, "cluster_B": 0}
+        cluster_parent = {"cluster_A": None, "cluster_B": None}
+        result = _compute_platform_extents(cluster_objs, gvid_to_ld, cluster_depth, cluster_parent)
+        # A is left of B: A's right edge must not exceed B's left edge
+        assert result["cluster_A"][1] <= result["cluster_B"][0]
+
+    def test_child_extent_within_parent(self):
+        cluster_objs = [
+            {"_gvid": 0, "nodes": [1, 2], "name": "cluster_A"},
+            {"_gvid": 1, "nodes": [2],    "name": "cluster_B"},
+        ]
+        gvid_to_ld    = {1: (0, 0), 2: (80, 0)}
+        cluster_depth  = {"cluster_A": 0, "cluster_B": 1}
+        cluster_parent = {"cluster_A": None, "cluster_B": "cluster_A"}
+        result = _compute_platform_extents(cluster_objs, gvid_to_ld, cluster_depth, cluster_parent)
+        ax0, ax1, az0, az1 = result["cluster_A"]
+        bx0, bx1, bz0, bz1 = result["cluster_B"]
+        assert bx0 >= ax0 and bx1 <= ax1
+        assert bz0 >= az0 and bz1 <= az1
+
+
+# ---------------------------------------------------------------------------
+# Step: _displace_lone_nodes
+# ---------------------------------------------------------------------------
+
+class TestDisplaceLoneNodes:
+    def test_lone_node_inside_platform_is_moved(self):
+        gvid_to_ld = {0: (0, 0)}
+        _displace_lone_nodes(gvid_to_ld, {}, {"c": (-40, 40, -40, 40)})
+        assert gvid_to_ld[0] != (0, 0)
+
+    def test_displaced_node_no_longer_overlaps(self):
+        gvid_to_ld = {0: (0, 0)}
+        _displace_lone_nodes(gvid_to_ld, {}, {"c": (-40, 40, -40, 40)})
+        ldx, ldz = gvid_to_ld[0]
+        bx0, bx1 = ldx - _TILE_LDU, ldx + _TILE_LDU
+        bz0, bz1 = ldz - _TILE_LDU, ldz + _TILE_LDU
+        assert not (bx0 < 40 and bx1 > -40 and bz0 < 40 and bz1 > -40)
+
+    def test_clustered_node_not_displaced(self):
+        gvid_to_ld = {0: (0, 0)}
+        _displace_lone_nodes(gvid_to_ld, {0: "cluster_A"}, {"cluster_A": (-40, 40, -40, 40)})
+        assert gvid_to_ld[0] == (0, 0)
+
+    def test_non_overlapping_lone_node_unchanged(self):
+        gvid_to_ld = {0: (200, 0)}
+        _displace_lone_nodes(gvid_to_ld, {}, {"c": (-40, 40, -40, 40)})
+        assert gvid_to_ld[0] == (200, 0)
+
+    def test_result_snapped_to_tile_grid(self):
+        gvid_to_ld = {0: (0, 0)}
+        _displace_lone_nodes(gvid_to_ld, {}, {"c": (-40, 40, -40, 40)})
+        ldx, ldz = gvid_to_ld[0]
+        assert ldx % _TILE_LDU == 0
+        assert ldz % _TILE_LDU == 0
+
+
+# ---------------------------------------------------------------------------
+# Step: _build_node_pieces
+# ---------------------------------------------------------------------------
+
+class TestBuildNodePieces:
+    def _inputs(self):
+        node_objs = [
+            {"_gvid": 0, "pos": "0,0",  "image": "/k8s/pod.png", "label": "lone"},
+            {"_gvid": 1, "pos": "80,0", "image": "",             "label": "clustered"},
+        ]
+        gvid_to_ld    = {0: (0, 0), 1: (80, 0)}
+        node_cluster  = {1: "cluster_A"}
+        cluster_color = {"cluster_A": 1}
+        cluster_depth = {"cluster_A": 0}
+        return node_objs, gvid_to_ld, node_cluster, cluster_color, cluster_depth
+
+    def test_pieces_count_equals_nodes(self):
+        pieces, _, _, _ = _build_node_pieces(*self._inputs())
+        assert len(pieces) == 2
+
+    def test_node_data_count_equals_nodes(self):
+        _, node_data, _, _ = _build_node_pieces(*self._inputs())
+        assert len(node_data) == 2
+
+    def test_all_pieces_are_bricks(self):
+        pieces, _, _, _ = _build_node_pieces(*self._inputs())
+        assert all(p.part == "3003" for p in pieces)
+
+    def test_lone_node_y(self):
+        _, _, _, lone_bricks = _build_node_pieces(*self._inputs())
+        assert lone_bricks[0].pos[1] == pytest.approx(-_BRICK_H_LDU)
+
+    def test_cluster_node_elevated_by_platform(self):
+        # depth=0 → node_y = -(1*PLATE_H + BRICK_H)
+        _, _, cluster_bricks, _ = _build_node_pieces(*self._inputs())
+        assert cluster_bricks["cluster_A"][0].pos[1] == pytest.approx(-_PLATE_H_LDU - _BRICK_H_LDU)
+
+    def test_cluster_node_bricks_keyed_by_cluster(self):
+        _, _, cluster_bricks, _ = _build_node_pieces(*self._inputs())
+        assert "cluster_A" in cluster_bricks
+        assert len(cluster_bricks["cluster_A"]) == 1
+
+    def test_lone_node_bricks_list(self):
+        _, _, _, lone_bricks = _build_node_pieces(*self._inputs())
+        assert len(lone_bricks) == 1
+
+    def test_lone_node_color_from_provider(self):
+        _, _, _, lone_bricks = _build_node_pieces(*self._inputs())
+        assert lone_bricks[0].color == 1  # k8s → blue
+
+
+# ---------------------------------------------------------------------------
+# Step: _build_platform_pieces
+# ---------------------------------------------------------------------------
+
+class TestBuildPlatformPieces:
+    def _inputs(self):
+        cluster_objs        = [{"_gvid": 0, "nodes": [1], "name": "cluster_A"}]
+        cluster_tile_extent = {"cluster_A": (0, 40, 0, 40)}
+        cluster_depth       = {"cluster_A": 0}
+        cluster_color       = {"cluster_A": 1}
+        return cluster_objs, cluster_tile_extent, cluster_depth, cluster_color
+
+    def test_pieces_are_1x1_plates(self):
+        pieces, _ = _build_platform_pieces(*self._inputs())
+        assert all(p.part == "3024" for p in pieces)
+
+    def test_tile_count_covers_extent(self):
+        # extent (0,40, 0,40) → 2×2 tiles of 20 LDU each → 4 tiles
+        pieces, _ = _build_platform_pieces(*self._inputs())
+        assert len(pieces) == 4
+
+    def test_plate_y_depth_0(self):
+        pieces, _ = _build_platform_pieces(*self._inputs())
+        for p in pieces:
+            assert p.pos[1] == pytest.approx(-_PLATE_H_LDU)
+
+    def test_plate_y_depth_1(self):
+        cluster_objs        = [{"_gvid": 0, "nodes": [1], "name": "cluster_B"}]
+        cluster_tile_extent = {"cluster_B": (0, 20, 0, 20)}
+        cluster_depth       = {"cluster_B": 1}
+        cluster_color       = {"cluster_B": 4}
+        pieces, _ = _build_platform_pieces(cluster_objs, cluster_tile_extent, cluster_depth, cluster_color)
+        for p in pieces:
+            assert p.pos[1] == pytest.approx(-2 * _PLATE_H_LDU)
+
+    def test_cluster_platform_tiles_populated(self):
+        _, cluster_platform_tiles = _build_platform_pieces(*self._inputs())
+        assert "cluster_A" in cluster_platform_tiles
+        assert len(cluster_platform_tiles["cluster_A"]) == 4
+
+    def test_cluster_missing_from_extent_skipped(self):
+        cluster_objs = [{"_gvid": 0, "nodes": [1], "name": "cluster_A"}]
+        pieces, _ = _build_platform_pieces(cluster_objs, {}, {"cluster_A": 0}, {})
+        assert pieces == []
+
+
+# ---------------------------------------------------------------------------
+# Step: _assemble_piece_groups
+# ---------------------------------------------------------------------------
+
+def _make_piece(part: str = "3024") -> Piece:
+    return Piece(part=part, color=1, pos=np.zeros(3), rot=np.eye(3))
+
+
+class TestAssemblePieceGroups:
+    def test_cluster_group_present(self):
+        cluster_objs  = [{"_gvid": 0, "nodes": [1], "name": "cluster_A"}]
+        cluster_depth = {"cluster_A": 0}
+        groups = _assemble_piece_groups(
+            cluster_objs, cluster_depth, {"cluster_A": [_make_piece("3003")]}, {}, []
+        )
+        assert any(name == "cluster_A" for name, _ in groups)
+
+    def test_lone_group_appended_last(self):
+        cluster_objs  = [{"_gvid": 0, "nodes": [1], "name": "cluster_A"}]
+        cluster_depth = {"cluster_A": 0}
+        groups = _assemble_piece_groups(
+            cluster_objs, cluster_depth,
+            {"cluster_A": [_make_piece("3003")]}, {},
+            [_make_piece("3003")],
+        )
+        assert groups[-1][0] == "lone"
+
+    def test_platform_tiles_before_node_brick_within_group(self):
+        cluster_objs  = [{"_gvid": 0, "nodes": [1], "name": "cluster_A"}]
+        cluster_depth = {"cluster_A": 0}
+        tile  = _make_piece("3024")
+        brick = _make_piece("3003")
+        groups = _assemble_piece_groups(
+            cluster_objs, cluster_depth,
+            {"cluster_A": [brick]}, {"cluster_A": [tile]}, []
+        )
+        _, grp = groups[0]
+        assert grp[0].part == "3024"
+        assert grp[-1].part == "3003"
+
+    def test_outer_cluster_before_inner(self):
+        cluster_objs = [
+            {"_gvid": 0, "nodes": [1, 2], "name": "cluster_A"},
+            {"_gvid": 1, "nodes": [2],    "name": "cluster_B"},
+        ]
+        cluster_depth = {"cluster_A": 0, "cluster_B": 1}
+        groups = _assemble_piece_groups(
+            cluster_objs, cluster_depth,
+            {"cluster_A": [_make_piece("3003")], "cluster_B": [_make_piece("3003")]},
+            {}, [],
+        )
+        names = [n for n, _ in groups]
+        assert names.index("cluster_A") < names.index("cluster_B")
+
+    def test_empty_cluster_omitted(self):
+        cluster_objs  = [{"_gvid": 0, "nodes": [1], "name": "cluster_A"}]
+        cluster_depth = {"cluster_A": 0}
+        groups = _assemble_piece_groups(cluster_objs, cluster_depth, {}, {}, [])
+        assert groups == []
+
+    def test_no_lone_group_when_no_lone_bricks(self):
+        cluster_objs  = [{"_gvid": 0, "nodes": [1], "name": "cluster_A"}]
+        cluster_depth = {"cluster_A": 0}
+        groups = _assemble_piece_groups(
+            cluster_objs, cluster_depth, {"cluster_A": [_make_piece("3003")]}, {}, []
+        )
+        assert all(name != "lone" for name, _ in groups)
+
+
+# ---------------------------------------------------------------------------
+# Step: _build_edge_positions
+# ---------------------------------------------------------------------------
+
+class TestBuildEdgePositions:
+    def test_known_edge_produces_pair(self):
+        result = _build_edge_positions([{"tail": 0, "head": 1}], {0: (0, 0), 1: (80, 0)})
+        assert len(result) == 1
+
+    def test_positions_are_numpy_arrays(self):
+        from_pos, to_pos = _build_edge_positions([{"tail": 0, "head": 1}], {0: (0, 0), 1: (80, 0)})[0]
+        assert isinstance(from_pos, np.ndarray)
+        assert isinstance(to_pos, np.ndarray)
+
+    def test_positions_at_floor_y(self):
+        from_pos, to_pos = _build_edge_positions([{"tail": 0, "head": 1}], {0: (0, 0), 1: (80, 0)})[0]
+        assert from_pos[1] == pytest.approx(0.0)
+        assert to_pos[1] == pytest.approx(0.0)
+
+    def test_xz_match_gvid_to_ld(self):
+        from_pos, to_pos = _build_edge_positions(
+            [{"tail": 0, "head": 1}], {0: (40, 60), 1: (120, 20)}
+        )[0]
+        assert from_pos[0] == pytest.approx(40.0) and from_pos[2] == pytest.approx(60.0)
+        assert to_pos[0] == pytest.approx(120.0) and to_pos[2] == pytest.approx(20.0)
+
+    def test_unknown_tail_skipped(self):
+        assert _build_edge_positions([{"tail": 99, "head": 1}], {0: (0, 0), 1: (80, 0)}) == []
+
+    def test_unknown_head_skipped(self):
+        assert _build_edge_positions([{"tail": 0, "head": 99}], {0: (0, 0)}) == []
+
+    def test_empty_edges(self):
+        assert _build_edge_positions([], {0: (0, 0)}) == []

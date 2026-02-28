@@ -42,16 +42,21 @@ def extract_graph(script_path: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Constants
 # ---------------------------------------------------------------------------
 
 # LDraw color palette for clusters: blue, red, green, orange, light-blue, tan
 _CLUSTER_PALETTE = [1, 4, 2, 25, 41, 22]
 
 # LDraw heights in LDU (1 LDU = 0.4 mm; 1 stud = 8 mm = 20 LDU)
-_PLATE_H_LDU = 8   # height of a 2×2 plate  (3022, height=1/3 brick)
-_BRICK_H_LDU = 24  # height of a 2×2 brick  (3003, height=1   brick)
+_PLATE_H_LDU = 8   # height of a 1×1 plate (3024, height = 1/3 brick)
+_BRICK_H_LDU = 24  # height of a 2×2 brick (3003, height = 1 brick)
+_TILE_LDU    = 20  # one stud = one 1×1 tile width
 
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def _provider_color(image_path: str) -> int:
     """Derive a LDraw color from a diagrams provider icon path."""
@@ -73,52 +78,26 @@ def _median_nn_dist(xs: list[float], ys: list[float]) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Scene builder
+# Scene-building steps
 # ---------------------------------------------------------------------------
 
-def build_ldr_scene(
-    graph: dict,
-) -> tuple[list[Piece], list[tuple], list[dict], list[tuple[str, list[Piece]]]]:
-    """Parse graphviz JSON layout and build LDraw scene data.
-
-    Parameters
-    ----------
-    graph:
-        Dict returned by ``extract_graph()``.
-
-    Returns
-    -------
-    pieces
-        List of :class:`~ldr2svg.parts.Piece` objects (node bricks + platform
-        tiles) ready to be rendered by :func:`~ldr2svg.ldr2png_svg.build_pngs`.
-    edge_positions
-        List of ``(from_pos, to_pos)`` numpy arrays in LDraw coordinates at
-        floor level (Y = 0) — used to draw SVG floor arrows.
-    node_data
-        List of dicts, one per node::
-
-            {
-              "pos":       np.array([ldx, node_y, ldz]),  # LDraw world pos
-              "icon_path": str | None,                    # absolute PNG path
-              "label":     str,
-              "half_w":    int,                           # half-side in LDU
-            }
-    piece_groups
-        Ordered list of ``(group_name, pieces)`` tuples suitable for wrapping
-        in SVG ``<g>`` elements.  Clusters appear outermost-first; lone nodes
-        are last under the name ``"lone"``.  Platform tiles come before the
-        node brick within each cluster group.
-    """
+def _parse_objects(graph: dict) -> tuple[list[dict], list[dict]]:
+    """Split graph objects into node objects and cluster subgraph objects."""
     objects = graph.get("objects", [])
-    edges   = graph.get("edges",   [])
-
-    # ── Step 1: split node objects vs cluster subgraphs ───────────────────
     node_objs    = [o for o in objects if "pos" in o]
     cluster_objs = [o for o in objects if "nodes" in o]
+    return node_objs, cluster_objs
 
-    gvid_to_node = {o["_gvid"]: o for o in node_objs}
 
-    # For each node, find the innermost cluster (fewest members) that contains it
+def _compute_cluster_metadata(
+    node_objs: list[dict],
+    cluster_objs: list[dict],
+) -> tuple[dict[int, str], dict[str, int], dict[str, int], dict[str, str | None]]:
+    """Return node→cluster mapping, cluster colors, nesting depths, and parent links."""
+    gvid_to_node     = {o["_gvid"]: o for o in node_objs}
+    cluster_node_sets = {cl["name"]: set(cl["nodes"]) for cl in cluster_objs}
+
+    # Each node's innermost cluster (smallest member count)
     node_cluster: dict[int, str] = {}
     for gvid in gvid_to_node:
         best_name: str | None = None
@@ -130,8 +109,8 @@ def build_ldr_scene(
         if best_name is not None:
             node_cluster[gvid] = best_name
 
-    # Assign colors to clusters in appearance order
-    unique_clusters: list[str] = list(dict.fromkeys(
+    # Assign colors in first-appearance order
+    unique_clusters = list(dict.fromkeys(
         node_cluster[gvid]
         for gvid in gvid_to_node
         if gvid in node_cluster
@@ -141,10 +120,7 @@ def build_ldr_scene(
         for i, name in enumerate(unique_clusters)
     }
 
-    # Nesting depth: number of clusters whose node set strictly contains this one.
-    # depth=0 → outermost, depth=1 → one level in, etc.
-    # Platforms are stacked at Y = -(depth+1) * PLATE_H so inner clusters appear raised.
-    cluster_node_sets = {cl["name"]: set(cl["nodes"]) for cl in cluster_objs}
+    # Nesting depth: number of clusters whose node set strictly contains this one
     cluster_depth: dict[str, int] = {
         cl["name"]: sum(
             1 for other in cluster_objs
@@ -153,12 +129,7 @@ def build_ldr_scene(
         for cl in cluster_objs
     }
 
-    tile      = 20  # 20 LDU = 1 stud = one 1×1 tile width
-    max_depth = max(cluster_depth.values(), default=0)
-
-    # Direct parent of each cluster: the smallest cluster whose node set
-    # strictly contains this one.  Used to clip child platforms so they never
-    # spill into sibling territory.
+    # Direct parent: smallest strictly-containing cluster
     cluster_parent: dict[str, str | None] = {}
     for cl in cluster_objs:
         containing = [
@@ -170,37 +141,53 @@ def build_ldr_scene(
             if containing else None
         )
 
-    # ── Step 2: normalize graphviz positions to LDraw grid ────────────────
-    # Graphviz pos string is "x,y" in points (1 pt = 1/72 inch).
-    # We scale so median nearest-neighbour distance ≥ 80 LDU (4 studs),
-    # then snap to 20-LDU (1-stud) increments.
+    return node_cluster, cluster_color, cluster_depth, cluster_parent
+
+
+def _layout_positions(node_objs: list[dict]) -> dict[int, tuple[int, int]]:
+    """Normalize graphviz node positions to a snapped LDraw (X, Z) grid.
+
+    Scales so the median nearest-neighbour distance is ≥ 80 LDU (4 studs),
+    then snaps to ``_TILE_LDU`` increments.
+    """
     gvx = [float(o["pos"].split(",")[0]) for o in node_objs]
     gvy = [float(o["pos"].split(",")[1]) for o in node_objs]
     nn_dist = _median_nn_dist(gvx, gvy)
     scale = 80.0 / nn_dist if nn_dist > 1e-6 else 1.0
 
-    def snap(v: float) -> int:
-        return round(v * scale / 20) * 20
-
     gvid_to_ld: dict[int, tuple[int, int]] = {}
     for obj in node_objs:
         gx = float(obj["pos"].split(",")[0])
         gy = float(obj["pos"].split(",")[1])
-        gvid_to_ld[obj["_gvid"]] = (snap(gx), snap(-gy))  # negate Y: gv↑ → LDraw -Z
+        ldx = round(gx * scale / _TILE_LDU) * _TILE_LDU
+        ldz = round(-gy * scale / _TILE_LDU) * _TILE_LDU  # negate Y: gv↑ → LDraw -Z
+        gvid_to_ld[obj["_gvid"]] = (ldx, ldz)
+    return gvid_to_ld
 
-    # ── Step 2c: pre-compute sibling-bounded, parent-clipped platform extents ─
-    # Build per-cluster node-position lists (only nodes with LDraw positions).
+
+def _compute_platform_extents(
+    cluster_objs: list[dict],
+    gvid_to_ld: dict[int, tuple[int, int]],
+    cluster_depth: dict[str, int],
+    cluster_parent: dict[str, str | None],
+) -> dict[str, tuple[int, int, int, int]]:
+    """Return sibling-bounded, parent-clipped XZ extents ``(x0,x1,z0,z1)`` per cluster.
+
+    Processes outermost clusters first so parent extents exist when children
+    are clipped.  Additionally caps each cluster's extent at the midpoint to
+    the nearest sibling node so sibling platforms never overlap.
+    """
+    max_depth = max(cluster_depth.values(), default=0)
+
+    # Collect LDraw X/Z positions of member nodes per cluster
     cluster_node_xs: dict[str, list[int]] = {}
     cluster_node_zs: dict[str, list[int]] = {}
     for cl in cluster_objs:
-        cl_ld = [g for g in cl["nodes"] if g in gvid_to_ld]
-        if cl_ld:
-            cluster_node_xs[cl["name"]] = [gvid_to_ld[g][0] for g in cl_ld]
-            cluster_node_zs[cl["name"]] = [gvid_to_ld[g][1] for g in cl_ld]
+        members = [g for g in cl["nodes"] if g in gvid_to_ld]
+        if members:
+            cluster_node_xs[cl["name"]] = [gvid_to_ld[g][0] for g in members]
+            cluster_node_zs[cl["name"]] = [gvid_to_ld[g][1] for g in members]
 
-    # Process outermost-first so parent extents exist when children are clipped.
-    # Additionally cap each cluster's extent at the midpoint to the nearest
-    # sibling node so that sibling platforms never overlap (e.g. Pods ⊄ MySQL).
     cluster_tile_extent: dict[str, tuple[int, int, int, int]] = {}
     for d in range(max_depth + 1):
         depth_clusters = [cl for cl in cluster_objs if cluster_depth[cl["name"]] == d]
@@ -210,13 +197,13 @@ def build_ldr_scene(
                 continue
             xs  = cluster_node_xs[name]
             zs  = cluster_node_zs[name]
-            pad = tile * (max_depth - d + 2)
-            x0 = math.floor((min(xs) - pad) / tile) * tile
-            x1 = math.ceil ((max(xs) + pad) / tile) * tile
-            z0 = math.floor((min(zs) - pad) / tile) * tile
-            z1 = math.ceil ((max(zs) + pad) / tile) * tile
+            pad = _TILE_LDU * (max_depth - d + 2)
+            x0 = math.floor((min(xs) - pad) / _TILE_LDU) * _TILE_LDU
+            x1 = math.ceil ((max(xs) + pad) / _TILE_LDU) * _TILE_LDU
+            z0 = math.floor((min(zs) - pad) / _TILE_LDU) * _TILE_LDU
+            z1 = math.ceil ((max(zs) + pad) / _TILE_LDU) * _TILE_LDU
 
-            # Cap at midpoint to each sibling (same parent, same depth).
+            # Cap at midpoint to each sibling (same parent, same depth)
             for sib in depth_clusters:
                 sib_name = sib["name"]
                 if sib_name == name or sib_name not in cluster_node_xs:
@@ -225,20 +212,20 @@ def build_ldr_scene(
                     continue
                 sib_xs = cluster_node_xs[sib_name]
                 sib_zs = cluster_node_zs[sib_name]
-                if min(sib_xs) > max(xs):   # sibling is to the right
-                    mid = math.floor((max(xs) + min(sib_xs)) / 2 / tile) * tile
+                if min(sib_xs) > max(xs):
+                    mid = math.floor((max(xs) + min(sib_xs)) / 2 / _TILE_LDU) * _TILE_LDU
                     x1 = min(x1, mid)
-                elif max(sib_xs) < min(xs): # sibling is to the left
-                    mid = math.ceil((max(sib_xs) + min(xs)) / 2 / tile) * tile
+                elif max(sib_xs) < min(xs):
+                    mid = math.ceil((max(sib_xs) + min(xs)) / 2 / _TILE_LDU) * _TILE_LDU
                     x0 = max(x0, mid)
-                if min(sib_zs) > max(zs):   # sibling is further back
-                    mid = math.floor((max(zs) + min(sib_zs)) / 2 / tile) * tile
+                if min(sib_zs) > max(zs):
+                    mid = math.floor((max(zs) + min(sib_zs)) / 2 / _TILE_LDU) * _TILE_LDU
                     z1 = min(z1, mid)
-                elif max(sib_zs) < min(zs): # sibling is in front
-                    mid = math.ceil((max(sib_zs) + min(zs)) / 2 / tile) * tile
+                elif max(sib_zs) < min(zs):
+                    mid = math.ceil((max(sib_zs) + min(zs)) / 2 / _TILE_LDU) * _TILE_LDU
                     z0 = max(z0, mid)
 
-            # Clip to parent's tile extent.
+            # Clip to parent's already-computed extent
             parent = cluster_parent[name]
             if parent and parent in cluster_tile_extent:
                 px0, px1, pz0, pz1 = cluster_tile_extent[parent]
@@ -247,43 +234,67 @@ def build_ldr_scene(
 
             cluster_tile_extent[name] = (x0, x1, z0, z1)
 
-    # ── Step 2b: push lone nodes outside cluster platform footprints ───────
-    # A lone node whose 2×2 brick footprint (center ±20 LDU) overlaps a cluster
-    # platform is displaced to the nearer outside edge plus one-stud clearance.
+    return cluster_tile_extent
+
+
+def _displace_lone_nodes(
+    gvid_to_ld: dict[int, tuple[int, int]],
+    node_cluster: dict[int, str],
+    cluster_tile_extent: dict[str, tuple[int, int, int, int]],
+) -> None:
+    """Mutate ``gvid_to_ld`` to push lone nodes outside any overlapping cluster platform."""
     for gvid in list(gvid_to_ld):
         if gvid in node_cluster:
             continue  # clustered nodes sit on their platform intentionally
         ldx, ldz = gvid_to_ld[gvid]
         for px0, px1, pz0, pz1 in cluster_tile_extent.values():
-            bx0, bx1 = ldx - 20, ldx + 20
-            bz0, bz1 = ldz - 20, ldz + 20
+            bx0, bx1 = ldx - _TILE_LDU, ldx + _TILE_LDU
+            bz0, bz1 = ldz - _TILE_LDU, ldz + _TILE_LDU
             if not (bx0 < px1 and bx1 > px0 and bz0 < pz1 and bz1 > pz0):
                 continue
-            # Move to the nearest edge (+1-stud clearance so brick clears it)
-            dx_left = ldx - px0
+            dx_left  = ldx - px0
             dx_right = px1 - ldx
-            dz_near = ldz - pz0
-            dz_far  = pz1 - ldz
+            dz_near  = ldz - pz0
+            dz_far   = pz1 - ldz
+            clearance = 2 * _TILE_LDU  # brick half + 1-stud gap
             if min(dx_left, dx_right) <= min(dz_near, dz_far):
                 ldx = round(
-                    (px0 - 40 if dx_left <= dx_right else px1 + 40) / 20
-                ) * 20
+                    (px0 - clearance if dx_left <= dx_right else px1 + clearance)
+                    / _TILE_LDU
+                ) * _TILE_LDU
             else:
                 ldz = round(
-                    (pz0 - 40 if dz_near <= dz_far else pz1 + 40) / 20
-                ) * 20
+                    (pz0 - clearance if dz_near <= dz_far else pz1 + clearance)
+                    / _TILE_LDU
+                ) * _TILE_LDU
             gvid_to_ld[gvid] = (ldx, ldz)
             break
 
-    # ── Steps 3–4: node pieces ────────────────────────────────────────────
-    # LDraw Y convention: floor = Y=0; pieces above floor have negative Y.
-    # Piece pos[1] = top-face Y.
-    #   Lone brick on floor:               pos_Y = -BRICK_H
-    #   Brick on cluster platform (depth d): pos_Y = -(d+1)*PLATE_H - BRICK_H
+
+def _build_node_pieces(
+    node_objs: list[dict],
+    gvid_to_ld: dict[int, tuple[int, int]],
+    node_cluster: dict[int, str],
+    cluster_color: dict[str, int],
+    cluster_depth: dict[str, int],
+) -> tuple[list[Piece], list[dict], dict[str, list[Piece]], list[Piece]]:
+    """Build 2×2 brick pieces and metadata for each node.
+
+    Returns
+    -------
+    pieces
+        One :class:`Piece` per node.
+    node_data
+        One metadata dict per node (pos, icon_path, label, half_w).
+    cluster_node_bricks
+        Maps cluster name → list of its node brick pieces.
+    lone_node_bricks
+        Node bricks that belong to no cluster.
+    """
     pieces: list[Piece] = []
     node_data: list[dict] = []
     cluster_node_bricks: dict[str, list[Piece]] = {}
-    lone_node_bricks:   list[Piece] = []
+    lone_node_bricks: list[Piece] = []
 
     for obj in node_objs:
         gvid = obj["_gvid"]
@@ -306,7 +317,7 @@ def build_ldr_scene(
             "pos":       pos,
             "icon_path": obj.get("image") or None,
             "label":     obj.get("label", ""),
-            "half_w":    20,   # 2×2 brick → half-side = 20 LDU
+            "half_w":    20,
         })
 
         if in_cluster:
@@ -314,58 +325,82 @@ def build_ldr_scene(
         else:
             lone_node_bricks.append(piece)
 
-    # ── Step 5: cluster platform pieces (1×1 plates, stacked by depth) ────
-    # 1×1 plates (3024, tile=20 LDU) give 1-stud snap precision so each
-    # outer platform can show exactly one stud of its colour around its children.
-    #
-    # Depth-d cluster → plate pos_Y = -(d+1)*PLATE_H.
-    # Outermost (d=0) sits on the floor; each inner level is one plate higher.
-    #
-    # Padding formula (tile=20 LDU = 1 stud):
-    #   pad = tile × (max_depth − depth + 2)
-    # → deepest cluster:  pad = 2×tile = 40 LDU  (brick half 20 + 1 stud border)
-    # → each outer level adds one stud, so the border between adjacent levels
-    #   is exactly 1 stud.
+    return pieces, node_data, cluster_node_bricks, lone_node_bricks
+
+
+def _build_platform_pieces(
+    cluster_objs: list[dict],
+    cluster_tile_extent: dict[str, tuple[int, int, int, int]],
+    cluster_depth: dict[str, int],
+    cluster_color: dict[str, int],
+) -> tuple[list[Piece], dict[str, list[Piece]]]:
+    """Build 1×1 plate tiles covering each cluster's XZ extent.
+
+    Returns
+    -------
+    pieces
+        All platform tile pieces.
+    cluster_platform_tiles
+        Maps cluster name → list of its tile pieces.
+    """
+    pieces: list[Piece] = []
     cluster_platform_tiles: dict[str, list[Piece]] = {}
 
     for cl in cluster_objs:
-        if cl["name"] not in cluster_tile_extent:
+        name = cl["name"]
+        if name not in cluster_tile_extent:
             continue
-        x0s, x1s, z0s, z1s = cluster_tile_extent[cl["name"]]
+        x0, x1, z0, z1 = cluster_tile_extent[name]
+        plate_y = float(-(cluster_depth[name] + 1) * _PLATE_H_LDU)
+        color   = cluster_color.get(name, 15)
 
-        depth   = cluster_depth[cl["name"]]
-        plate_y = float(-(depth + 1) * _PLATE_H_LDU)
-        cl_c    = cluster_color.get(cl["name"], 15)
-
-        x = x0s
-        while x < x1s:
-            z = z0s
-            while z < z1s:
-                # Piece origin = centre of 20×20 LDU tile (1×1 plate)
-                pos = np.array([float(x + tile // 2), plate_y, float(z + tile // 2)])
-                piece = Piece(part="3024", color=cl_c, pos=pos, rot=np.eye(3))
+        x = x0
+        while x < x1:
+            z = z0
+            while z < z1:
+                pos = np.array([float(x + _TILE_LDU // 2), plate_y, float(z + _TILE_LDU // 2)])
+                piece = Piece(part="3024", color=color, pos=pos, rot=np.eye(3))
                 pieces.append(piece)
-                cluster_platform_tiles.setdefault(cl["name"], []).append(piece)
-                z += tile
-            x += tile
+                cluster_platform_tiles.setdefault(name, []).append(piece)
+                z += _TILE_LDU
+            x += _TILE_LDU
 
-    # ── Step 6: piece_groups — ordered list of (name, pieces) for <g> tags ─
-    # Outermost cluster first so inner-cluster tiles render on top in the SVG.
-    # Within each group: platform tiles first, then the node brick.
+    return pieces, cluster_platform_tiles
+
+
+def _assemble_piece_groups(
+    cluster_objs: list[dict],
+    cluster_depth: dict[str, int],
+    cluster_node_bricks: dict[str, list[Piece]],
+    cluster_platform_tiles: dict[str, list[Piece]],
+    lone_node_bricks: list[Piece],
+) -> list[tuple[str, list[Piece]]]:
+    """Order pieces into named groups for SVG ``<g>`` elements.
+
+    Clusters appear outermost-first (depth 0 → N) so inner tiles render on
+    top.  Within each group: platform tiles first, then the node brick.
+    Lone nodes are last under the name ``"lone"``.
+    """
+    max_depth = max(cluster_depth.values(), default=0)
     piece_groups: list[tuple[str, list[Piece]]] = []
     for d in range(max_depth + 1):
         for cl in cluster_objs:
             name = cl["name"]
             if cluster_depth[name] != d:
                 continue
-            group: list[Piece] = (cluster_platform_tiles.get(name, []) +
-                                  cluster_node_bricks.get(name, []))
+            group = cluster_platform_tiles.get(name, []) + cluster_node_bricks.get(name, [])
             if group:
                 piece_groups.append((name, group))
     if lone_node_bricks:
         piece_groups.append(("lone", lone_node_bricks))
+    return piece_groups
 
-    # ── Step 7: edge positions for floor arrows ───────────────────────────
+
+def _build_edge_positions(
+    edges: list[dict],
+    gvid_to_ld: dict[int, tuple[int, int]],
+) -> list[tuple]:
+    """Map graphviz edges to LDraw floor-level ``(from_pos, to_pos)`` pairs."""
     edge_positions: list[tuple] = []
     for e in edges:
         tail_gvid = e.get("tail")
@@ -377,5 +412,62 @@ def build_ldr_scene(
                 np.array([float(tlx), 0.0, float(tlz)]),
                 np.array([float(hlx), 0.0, float(hlz)]),
             ))
+    return edge_positions
 
-    return pieces, edge_positions, node_data, piece_groups
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def build_ldr_scene(
+    graph: dict,
+) -> tuple[list[Piece], list[tuple], list[dict], list[tuple[str, list[Piece]]]]:
+    """Parse graphviz JSON layout and build LDraw scene data.
+
+    Parameters
+    ----------
+    graph:
+        Dict returned by ``extract_graph()``.
+
+    Returns
+    -------
+    pieces
+        All :class:`~ldr2svg.parts.Piece` objects (node bricks + platform
+        tiles) ready for :func:`~ldr2svg.ldr2png_svg.build_pngs`.
+    edge_positions
+        ``(from_pos, to_pos)`` pairs in LDraw coordinates at floor level
+        (Y = 0) — used to draw SVG floor arrows.
+    node_data
+        One dict per node with keys ``pos``, ``icon_path``, ``label``, ``half_w``.
+    piece_groups
+        Ordered ``(group_name, pieces)`` list for SVG ``<g>`` wrapping.
+    """
+    node_objs, cluster_objs = _parse_objects(graph)
+
+    node_cluster, cluster_color, cluster_depth, cluster_parent = (
+        _compute_cluster_metadata(node_objs, cluster_objs)
+    )
+
+    gvid_to_ld = _layout_positions(node_objs)
+
+    cluster_tile_extent = _compute_platform_extents(
+        cluster_objs, gvid_to_ld, cluster_depth, cluster_parent
+    )
+
+    _displace_lone_nodes(gvid_to_ld, node_cluster, cluster_tile_extent)
+
+    node_pieces, node_data, cluster_node_bricks, lone_node_bricks = _build_node_pieces(
+        node_objs, gvid_to_ld, node_cluster, cluster_color, cluster_depth
+    )
+
+    platform_pieces, cluster_platform_tiles = _build_platform_pieces(
+        cluster_objs, cluster_tile_extent, cluster_depth, cluster_color
+    )
+
+    piece_groups = _assemble_piece_groups(
+        cluster_objs, cluster_depth, cluster_node_bricks, cluster_platform_tiles, lone_node_bricks
+    )
+
+    edge_positions = _build_edge_positions(graph.get("edges", []), gvid_to_ld)
+
+    return node_pieces + platform_pieces, edge_positions, node_data, piece_groups
