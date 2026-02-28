@@ -1,4 +1,4 @@
-from diagrams import Cluster, Diagram, Node, Edge
+from diagrams import Cluster, Diagram, Edge
 from diagrams.k8s.compute import Pod
 from diagrams.k8s.network import Ing
 from diagrams.gcp.network import LoadBalancing
