@@ -283,9 +283,11 @@ class TestBuildLdrSceneNestedCluster:
         assert deep_brick.color == 1
 
     def test_deep_node_is_elevated(self):
+        # cluster_B (depth=1) sits inside cluster_A (depth=0).
+        # Node brick Y = -(depth+1)*PLATE_H - BRICK_H = -(2*8 + 24) = -40
         deep_nd = next(nd for nd in self.node_data if nd["label"] == "deep")
         deep_brick = next(p for p in self.bricks if np.allclose(p.pos, deep_nd["pos"]))
-        assert deep_brick.pos[1] == pytest.approx(-(_PLATE_H_LDU + _BRICK_H_LDU))
+        assert deep_brick.pos[1] == pytest.approx(-(2 * _PLATE_H_LDU + _BRICK_H_LDU))
 
 
 # ---------------------------------------------------------------------------

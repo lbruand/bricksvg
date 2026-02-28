@@ -136,6 +136,18 @@ def build_ldr_scene(
         for i, name in enumerate(unique_clusters)
     }
 
+    # Nesting depth: number of clusters whose node set strictly contains this one.
+    # depth=0 → outermost, depth=1 → one level in, etc.
+    # Platforms are stacked at Y = -(depth+1) * PLATE_H so inner clusters appear raised.
+    cluster_node_sets = {cl["name"]: set(cl["nodes"]) for cl in cluster_objs}
+    cluster_depth: dict[str, int] = {
+        cl["name"]: sum(
+            1 for other in cluster_objs
+            if cluster_node_sets[other["name"]] > cluster_node_sets[cl["name"]]
+        )
+        for cl in cluster_objs
+    }
+
     # ── Step 2: normalize graphviz positions to LDraw grid ────────────────
     # Graphviz pos string is "x,y" in points (1 pt = 1/72 inch).
     # We scale so median nearest-neighbour distance ≥ 80 LDU (4 studs),
@@ -157,9 +169,8 @@ def build_ldr_scene(
     # ── Steps 3–4: node pieces ────────────────────────────────────────────
     # LDraw Y convention: floor = Y=0; pieces above floor have negative Y.
     # Piece pos[1] = top-face Y.
-    #   Plate on floor:     pos_Y = -PLATE_H = -8
-    #   Brick on plate:     pos_Y = -(PLATE_H + BRICK_H) = -32
-    #   Lone brick on floor: pos_Y = -BRICK_H = -24
+    #   Lone brick on floor:               pos_Y = -BRICK_H
+    #   Brick on cluster platform (depth d): pos_Y = -(d+1)*PLATE_H - BRICK_H
     pieces: list[Piece] = []
     node_data: list[dict] = []
 
@@ -171,7 +182,11 @@ def build_ldr_scene(
         color = (cluster_color[node_cluster[gvid]] if in_cluster
                  else _provider_color(obj.get("image", "")))
 
-        node_y = float(-(_PLATE_H_LDU + _BRICK_H_LDU) if in_cluster else -_BRICK_H_LDU)
+        if in_cluster:
+            depth = cluster_depth[node_cluster[gvid]]
+            node_y = float(-(depth + 1) * _PLATE_H_LDU - _BRICK_H_LDU)
+        else:
+            node_y = float(-_BRICK_H_LDU)
         pos = np.array([float(ldx), node_y, float(ldz)])
 
         pieces.append(Piece(part="3003", color=color, pos=pos, rot=np.eye(3)))
@@ -182,10 +197,9 @@ def build_ldr_scene(
             "half_w":    20,   # 2×2 brick → half-side = 20 LDU
         })
 
-    # ── Step 5: cluster platform pieces (2×2 plates at floor level) ───────
-    # Build one platform layer per cluster object.  The plate pos[1] = -PLATE_H
-    # so the plate sits on the floor (bottom at Y=0).
-    plate_y = float(-_PLATE_H_LDU)
+    # ── Step 5: cluster platform pieces (2×2 plates, stacked by depth) ────
+    # Depth-d cluster → plate pos_Y = -(d+1)*PLATE_H.
+    # Outermost (d=0) sits on the floor; each inner level is one plate higher.
     tile = 40  # 40 LDU = 2 studs = one 2×2 tile width
 
     for cl in cluster_objs:
@@ -202,7 +216,9 @@ def build_ldr_scene(
         z0s = math.floor((min(cl_zs) - pad) / tile) * tile
         z1s = math.ceil ((max(cl_zs) + pad) / tile) * tile
 
-        cl_c = cluster_color.get(cl["name"], 15)
+        depth   = cluster_depth[cl["name"]]
+        plate_y = float(-(depth + 1) * _PLATE_H_LDU)
+        cl_c    = cluster_color.get(cl["name"], 15)
 
         x = x0s
         while x < x1s:
