@@ -148,6 +148,9 @@ def build_ldr_scene(
         for cl in cluster_objs
     }
 
+    tile      = 20  # 20 LDU = 1 stud = one 1×1 tile width
+    max_depth = max(cluster_depth.values(), default=0)
+
     # ── Step 2: normalize graphviz positions to LDraw grid ────────────────
     # Graphviz pos string is "x,y" in points (1 pt = 1/72 inch).
     # We scale so median nearest-neighbour distance ≥ 80 LDU (4 studs),
@@ -165,6 +168,51 @@ def build_ldr_scene(
         gx = float(obj["pos"].split(",")[0])
         gy = float(obj["pos"].split(",")[1])
         gvid_to_ld[obj["_gvid"]] = (snap(gx), snap(-gy))  # negate Y: gv↑ → LDraw -Z
+
+    # ── Step 2b: push lone nodes outside cluster platform footprints ───────
+    # A lone node whose 2×2 brick footprint (center ±20 LDU) overlaps a cluster
+    # platform is displaced to the nearer outside edge plus one-stud clearance.
+    if cluster_objs:
+        platform_boxes: list[tuple[int, int, int, int]] = []
+        for cl in cluster_objs:
+            cl_ld = [g for g in cl["nodes"] if g in gvid_to_ld]
+            if not cl_ld:
+                continue
+            xs  = [gvid_to_ld[g][0] for g in cl_ld]
+            zs  = [gvid_to_ld[g][1] for g in cl_ld]
+            d   = cluster_depth[cl["name"]]
+            pad = tile * (max_depth - d + 2)
+            platform_boxes.append((
+                math.floor((min(xs) - pad) / tile) * tile,
+                math.ceil ((max(xs) + pad) / tile) * tile,
+                math.floor((min(zs) - pad) / tile) * tile,
+                math.ceil ((max(zs) + pad) / tile) * tile,
+            ))
+
+        for gvid in list(gvid_to_ld):
+            if gvid in node_cluster:
+                continue  # clustered nodes sit on their platform intentionally
+            ldx, ldz = gvid_to_ld[gvid]
+            for px0, px1, pz0, pz1 in platform_boxes:
+                bx0, bx1 = ldx - 20, ldx + 20
+                bz0, bz1 = ldz - 20, ldz + 20
+                if not (bx0 < px1 and bx1 > px0 and bz0 < pz1 and bz1 > pz0):
+                    continue
+                # Move to the nearest edge (+1-stud clearance so brick clears it)
+                dx_left = ldx - px0
+                dx_right = px1 - ldx
+                dz_near = ldz - pz0
+                dz_far  = pz1 - ldz
+                if min(dx_left, dx_right) <= min(dz_near, dz_far):
+                    ldx = round(
+                        (px0 - 40 if dx_left <= dx_right else px1 + 40) / 20
+                    ) * 20
+                else:
+                    ldz = round(
+                        (pz0 - 40 if dz_near <= dz_far else pz1 + 40) / 20
+                    ) * 20
+                gvid_to_ld[gvid] = (ldx, ldz)
+                break
 
     # ── Steps 3–4: node pieces ────────────────────────────────────────────
     # LDraw Y convention: floor = Y=0; pieces above floor have negative Y.
@@ -209,9 +257,6 @@ def build_ldr_scene(
     # → deepest cluster:  pad = 2×tile = 40 LDU  (brick half 20 + 1 stud border)
     # → each outer level adds one stud, so the border between adjacent levels
     #   is exactly 1 stud.
-    tile      = 20  # 20 LDU = 1 stud = one 1×1 tile width
-    max_depth = max(cluster_depth.values(), default=0)
-
     for cl in cluster_objs:
         cl_gvids = [g for g in cl["nodes"] if g in gvid_to_ld]
         if not cl_gvids:

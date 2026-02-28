@@ -56,6 +56,25 @@ def _nested_cluster_graph():
     }
 
 
+def _overlapping_graph():
+    """Lone node placed between two cluster nodes, initially inside the platform.
+
+    cluster_A has nodes at graphviz (0,0) and (160,0).
+    After scaling (nn_dist=80 → scale=1.0) they snap to LDraw X=0 and X=160.
+    Lone node at (80,0) snaps to X=80 — right in the middle of the platform
+    which extends from X=-40 to X=200 with pad=40.
+    """
+    return {
+        "objects": [
+            {"_gvid": 0, "nodes": [1, 2], "name": "cluster_A"},
+            {"_gvid": 1, "pos": "0,0",   "image": "/res/k8s/pod.png", "label": "left"},
+            {"_gvid": 2, "pos": "160,0", "image": "/res/k8s/pod.png", "label": "right"},
+            {"_gvid": 3, "pos": "80,0",  "image": "/res/gcp/lb.png",  "label": "lone"},
+        ],
+        "edges": [],
+    }
+
+
 # ---------------------------------------------------------------------------
 # extract_graph
 # ---------------------------------------------------------------------------
@@ -288,6 +307,48 @@ class TestBuildLdrSceneNestedCluster:
         deep_nd = next(nd for nd in self.node_data if nd["label"] == "deep")
         deep_brick = next(p for p in self.bricks if np.allclose(p.pos, deep_nd["pos"]))
         assert deep_brick.pos[1] == pytest.approx(-(2 * _PLATE_H_LDU + _BRICK_H_LDU))
+
+
+# ---------------------------------------------------------------------------
+# build_ldr_scene — lone node displacement
+# ---------------------------------------------------------------------------
+
+class TestLoneNodeDisplacement:
+    """Lone nodes that overlap a cluster platform must be pushed outside."""
+
+    def setup_method(self):
+        self.pieces, _, self.node_data = build_ldr_scene(_overlapping_graph())
+        self.bricks = [p for p in self.pieces if p.part == "3003"]
+
+    def _platform_box(self):
+        """Cluster_A platform extent: X=[-40,200], Z=[-40,40] (pad=40)."""
+        return (-40, 200, -40, 40)
+
+    def test_lone_node_not_inside_platform(self):
+        lone_nd = next(nd for nd in self.node_data if nd["label"] == "lone")
+        lx = lone_nd["pos"][0]
+        lz = lone_nd["pos"][2]
+        px0, px1, pz0, pz1 = self._platform_box()
+        overlaps_x = (lx - 20) < px1 and (lx + 20) > px0
+        overlaps_z = (lz - 20) < pz1 and (lz + 20) > pz0
+        assert not (overlaps_x and overlaps_z)
+
+    def test_lone_node_on_20ldu_grid(self):
+        lone_nd = next(nd for nd in self.node_data if nd["label"] == "lone")
+        assert lone_nd["pos"][0] % 20 == pytest.approx(0, abs=1e-6)
+        assert lone_nd["pos"][2] % 20 == pytest.approx(0, abs=1e-6)
+
+    def test_cluster_nodes_unchanged(self):
+        """Cluster node positions should not be affected by the displacement step."""
+        left_nd  = next(nd for nd in self.node_data if nd["label"] == "left")
+        right_nd = next(nd for nd in self.node_data if nd["label"] == "right")
+        assert left_nd["pos"][0]  == pytest.approx(0.0)
+        assert right_nd["pos"][0] == pytest.approx(160.0)
+
+    def test_lone_node_brick_exists(self):
+        lone_nd = next(nd for nd in self.node_data if nd["label"] == "lone")
+        match = [p for p in self.bricks if np.allclose(p.pos, lone_nd["pos"])]
+        assert len(match) == 1
 
 
 # ---------------------------------------------------------------------------
