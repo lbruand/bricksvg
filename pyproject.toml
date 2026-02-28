@@ -27,6 +27,12 @@ dev = [
     "ty>=0.0.19",
 ]
 
+[tool.ty.src]
+exclude = [
+    "scripts/",
+    "test/example_diagram.py",
+]
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["test"]

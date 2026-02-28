@@ -297,7 +297,7 @@ def _build_node_pieces(
     node_cluster: dict[int, str],
     cluster_color: dict[str, int],
     cluster_depth: dict[str, int],
-) -> tuple[list[Piece], list[dict], dict[str, list[Piece]], list[Piece]]:
+) -> tuple[list[Piece], list[dict], dict[str, list[Piece]], list[Piece], dict[int, float]]:
     """Build 2×2 brick pieces and metadata for each node.
 
     Returns

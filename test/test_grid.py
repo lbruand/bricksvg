@@ -65,23 +65,31 @@ class TestGridParams:
         assert len(result) == 5
 
     def test_bounds_include_piece_x_z(self):
-        fy, gx0, gx1, gz0, gz1 = _grid_params(_make_renders())
+        result = _grid_params(_make_renders())
+        assert result is not None
+        fy, gx0, gx1, gz0, gz1 = result
         assert gx0 <= 0 <= gx1
         assert gz0 <= 0 <= gz1
 
     def test_margin_extends_beyond_piece(self):
         # GRID_MARGIN=2 × GRID_STEP=20 → at least 40 LDU margin each side
-        fy, gx0, gx1, gz0, gz1 = _grid_params(_make_renders())
+        result = _grid_params(_make_renders())
+        assert result is not None
+        fy, gx0, gx1, gz0, gz1 = result
         assert gx0 < 0
         assert gx1 > 0
 
     def test_floor_y_matches_piece_bottom(self):
-        fy, *_ = _grid_params(_make_renders(-24.0))
+        result = _grid_params(_make_renders(-24.0))
+        assert result is not None
+        fy, *_ = result
         assert fy == pytest.approx(0.0)
 
     def test_snapped_to_grid_step(self):
         from ldr2svg.grid import GRID_STEP
-        fy, gx0, gx1, gz0, gz1 = _grid_params(_make_renders())
+        result = _grid_params(_make_renders())
+        assert result is not None
+        fy, gx0, gx1, gz0, gz1 = result
         assert gx0 % GRID_STEP == pytest.approx(0, abs=1e-9)
         assert gx1 % GRID_STEP == pytest.approx(0, abs=1e-9)
 

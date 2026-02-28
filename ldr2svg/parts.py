@@ -1,5 +1,6 @@
 """parts.py — LDraw data model: colours, part definitions, scene parser."""
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -53,7 +54,7 @@ class Piece:
     pos: np.ndarray    # (3,) LDraw world position (LDU)
     rot: np.ndarray    # (3, 3) LDraw rotation matrix
 
-def _parse_ldr_line(parts: list[str]) -> Piece:
+def _parse_ldr_line(parts: Sequence[str]) -> Piece:
     """Parse a tokenised LDraw type-1 line. Caller must ensure len >= 15 and parts[0] == '1'."""
     return Piece(
         part  = Path(" ".join(parts[14:])).stem.lower(),
