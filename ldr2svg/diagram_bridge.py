@@ -28,11 +28,11 @@ def extract_graph(script_path: str) -> dict:
             _captured.append(self.dot)
             # Skip super().__exit__() — no file output, no graphviz render
 
-    diagrams.Diagram = _CaptureDiagram
+    setattr(diagrams, "Diagram", _CaptureDiagram)
     try:
         runpy.run_path(script_path, run_name="__main__")
     finally:
-        diagrams.Diagram = _OrigDiagram
+        setattr(diagrams, "Diagram", _OrigDiagram)
 
     if not _captured:
         raise RuntimeError(f"No Diagram context captured from {script_path!r}")
