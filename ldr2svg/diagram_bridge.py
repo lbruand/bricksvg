@@ -363,16 +363,12 @@ def _build_platform_pieces(
         plate_y = float(-(cluster_depth[name] + 1) * _PLATE_H_LDU)
         color   = cluster_color.get(name, 15)
 
-        x = x0
-        while x < x1:
-            z = z0
-            while z < z1:
+        for x in range(x0, x1, _TILE_LDU):
+            for z in range(z0, z1, _TILE_LDU):
                 pos = np.array([float(x + _TILE_LDU // 2), plate_y, float(z + _TILE_LDU // 2)])
                 piece = Piece(part="3024", color=color, pos=pos, rot=np.eye(3))
                 pieces.append(piece)
                 cluster_platform_tiles.setdefault(name, []).append(piece)
-                z += _TILE_LDU
-            x += _TILE_LDU
 
     return pieces, cluster_platform_tiles
 
