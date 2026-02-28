@@ -409,3 +409,55 @@ class TestComposeDiagramSvg:
         last_use = svg_text.rindex("<use")
         icons_pos = svg_text.index('id="icons"')
         assert icons_pos > last_use
+
+
+# ---------------------------------------------------------------------------
+# compose_diagram_svg — piece_groups / <g> cluster grouping
+# ---------------------------------------------------------------------------
+
+def _make_piece_groups(renders):
+    """Build minimal piece_groups from _minimal_renders() pieces."""
+    all_pieces = [p for _, _, _, pl in renders.values() for p in pl]
+    return [("cluster_test", all_pieces[:1]), ("lone", all_pieces[1:])]
+
+
+class TestComposeDiagramSvgGroups:
+    def _run_grouped(self, tmp_path, name="grouped.svg"):
+        renders = _minimal_renders()
+        output = str(tmp_path / name)
+        piece_groups = _make_piece_groups(renders)
+        compose_diagram_svg(renders, output, arrows=[], node_data=[],
+                            piece_groups=piece_groups)
+        return output, ET.parse(output).getroot()
+
+    def test_cluster_g_present(self, tmp_path):
+        _, root = self._run_grouped(tmp_path)
+        grp = root.find(f".//{{{NS}}}g[@id='cluster_test']")
+        assert grp is not None
+
+    def test_lone_g_present(self, tmp_path):
+        _, root = self._run_grouped(tmp_path)
+        grp = root.find(f".//{{{NS}}}g[@id='lone']")
+        assert grp is not None
+
+    def test_uses_inside_cluster_g(self, tmp_path):
+        _, root = self._run_grouped(tmp_path)
+        grp = root.find(f".//{{{NS}}}g[@id='cluster_test']")
+        uses = grp.findall(f"{{{NS}}}use")
+        assert len(uses) == 1
+
+    def test_uses_inside_lone_g(self, tmp_path):
+        _, root = self._run_grouped(tmp_path)
+        grp = root.find(f".//{{{NS}}}g[@id='lone']")
+        uses = grp.findall(f"{{{NS}}}use")
+        assert len(uses) == 1
+
+    def test_total_use_count_unchanged(self, tmp_path):
+        _, root = self._run_grouped(tmp_path)
+        uses = root.findall(f".//{{{NS}}}use")
+        assert len(uses) == 2
+
+    def test_cluster_g_before_lone_g(self, tmp_path):
+        output, _ = self._run_grouped(tmp_path)
+        svg_text = Path(output).read_text()
+        assert svg_text.index('id="cluster_test"') < svg_text.index('id="lone"')

@@ -9,7 +9,7 @@ import svgwrite
 import svgwrite.container
 from PIL import Image
 
-from .compose import _project_pieces, _canvas_bounds, _build_defs
+from .compose import _project_pieces, _project_piece, _canvas_bounds, _build_defs
 from .projection import project_ldraw, PX_PER_MM
 from .grid import _grid_params, _grid_corner_sx_sy, _draw_isometric_grid
 from .parts import Piece
@@ -188,6 +188,7 @@ def compose_diagram_svg(
     output: str,
     arrows: list[tuple],
     node_data: list[dict],
+    piece_groups: list[tuple[str, list[Piece]]] | None = None,
     padding: int = 60,
 ) -> None:
     """Compose the final LEGO diagram SVG.
@@ -240,14 +241,40 @@ def compose_diagram_svg(
     # 3. Floor arrows
     _draw_floor_arrows(dwg, arrows, cx, cy)
 
-    # 4. Brick images in defs + placed instances (back-to-front)
+    # 4. Brick images in defs + placed instances (back-to-front, grouped by cluster)
     defs = _build_defs(dwg, renders)
-    for sx_px, sy_px, _, _, _, _, label in projected:
-        def_id, ax, ay = defs[label]
+
+    # Build a per-piece projection lookup so groups can sort independently.
+    piece_proj: dict[int, tuple] = {}
+    for piece, iw, ih, ax, ay in pngs:
+        piece_proj[id(piece)] = _project_piece(piece, iw, ih, ax, ay)
+        # returns (depth, ldy, sx_px, sy_px, ax, ay, iw, ih, label)
+
+    def _use(sx_px: float, sy_px: float, label: str) -> None:
+        def_id, dax, day = defs[label]
         dwg.add(dwg.use(
             f"#{def_id}",
-            insert=(f"{cx(sx_px) - ax:.1f}px", f"{cy(sy_px) - ay:.1f}px"),
+            insert=(f"{cx(sx_px) - dax:.1f}px", f"{cy(sy_px) - day:.1f}px"),
         ))
+
+    def _use_in(grp, sx_px: float, sy_px: float, label: str) -> None:
+        def_id, dax, day = defs[label]
+        grp.add(dwg.use(
+            f"#{def_id}",
+            insert=(f"{cx(sx_px) - dax:.1f}px", f"{cy(sy_px) - day:.1f}px"),
+        ))
+
+    if piece_groups is not None:
+        for group_name, group_pieces in piece_groups:
+            grp = dwg.g(id=group_name)
+            rows = [piece_proj[id(p)] for p in group_pieces if id(p) in piece_proj]
+            rows.sort(key=lambda r: (-r[1], r[0]))  # -ldy then cam_depth
+            for depth, ldy, sx_px, sy_px, _ax, _ay, iw, ih, label in rows:
+                _use_in(grp, sx_px, sy_px, label)
+            dwg.add(grp)
+    else:
+        for sx_px, sy_px, _, _, _, _, label in projected:
+            _use(sx_px, sy_px, label)
 
     # 5. Icons on top faces
     _draw_icons(dwg, node_data, cx, cy)

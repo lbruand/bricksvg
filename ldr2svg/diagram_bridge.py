@@ -78,7 +78,7 @@ def _median_nn_dist(xs: list[float], ys: list[float]) -> float:
 
 def build_ldr_scene(
     graph: dict,
-) -> tuple[list[Piece], list[tuple], list[dict]]:
+) -> tuple[list[Piece], list[tuple], list[dict], list[tuple[str, list[Piece]]]]:
     """Parse graphviz JSON layout and build LDraw scene data.
 
     Parameters
@@ -103,6 +103,11 @@ def build_ldr_scene(
               "label":     str,
               "half_w":    int,                           # half-side in LDU
             }
+    piece_groups
+        Ordered list of ``(group_name, pieces)`` tuples suitable for wrapping
+        in SVG ``<g>`` elements.  Clusters appear outermost-first; lone nodes
+        are last under the name ``"lone"``.  Platform tiles come before the
+        node brick within each cluster group.
     """
     objects = graph.get("objects", [])
     edges   = graph.get("edges",   [])
@@ -277,6 +282,8 @@ def build_ldr_scene(
     #   Brick on cluster platform (depth d): pos_Y = -(d+1)*PLATE_H - BRICK_H
     pieces: list[Piece] = []
     node_data: list[dict] = []
+    cluster_node_bricks: dict[str, list[Piece]] = {}
+    lone_node_bricks:   list[Piece] = []
 
     for obj in node_objs:
         gvid = obj["_gvid"]
@@ -293,13 +300,19 @@ def build_ldr_scene(
             node_y = float(-_BRICK_H_LDU)
         pos = np.array([float(ldx), node_y, float(ldz)])
 
-        pieces.append(Piece(part="3003", color=color, pos=pos, rot=np.eye(3)))
+        piece = Piece(part="3003", color=color, pos=pos, rot=np.eye(3))
+        pieces.append(piece)
         node_data.append({
             "pos":       pos,
             "icon_path": obj.get("image") or None,
             "label":     obj.get("label", ""),
             "half_w":    20,   # 2×2 brick → half-side = 20 LDU
         })
+
+        if in_cluster:
+            cluster_node_bricks.setdefault(node_cluster[gvid], []).append(piece)
+        else:
+            lone_node_bricks.append(piece)
 
     # ── Step 5: cluster platform pieces (1×1 plates, stacked by depth) ────
     # 1×1 plates (3024, tile=20 LDU) give 1-stud snap precision so each
@@ -313,6 +326,8 @@ def build_ldr_scene(
     # → deepest cluster:  pad = 2×tile = 40 LDU  (brick half 20 + 1 stud border)
     # → each outer level adds one stud, so the border between adjacent levels
     #   is exactly 1 stud.
+    cluster_platform_tiles: dict[str, list[Piece]] = {}
+
     for cl in cluster_objs:
         if cl["name"] not in cluster_tile_extent:
             continue
@@ -328,9 +343,27 @@ def build_ldr_scene(
             while z < z1s:
                 # Piece origin = centre of 20×20 LDU tile (1×1 plate)
                 pos = np.array([float(x + tile // 2), plate_y, float(z + tile // 2)])
-                pieces.append(Piece(part="3024", color=cl_c, pos=pos, rot=np.eye(3)))
+                piece = Piece(part="3024", color=cl_c, pos=pos, rot=np.eye(3))
+                pieces.append(piece)
+                cluster_platform_tiles.setdefault(cl["name"], []).append(piece)
                 z += tile
             x += tile
+
+    # ── Step 6: piece_groups — ordered list of (name, pieces) for <g> tags ─
+    # Outermost cluster first so inner-cluster tiles render on top in the SVG.
+    # Within each group: platform tiles first, then the node brick.
+    piece_groups: list[tuple[str, list[Piece]]] = []
+    for d in range(max_depth + 1):
+        for cl in cluster_objs:
+            name = cl["name"]
+            if cluster_depth[name] != d:
+                continue
+            group: list[Piece] = (cluster_platform_tiles.get(name, []) +
+                                  cluster_node_bricks.get(name, []))
+            if group:
+                piece_groups.append((name, group))
+    if lone_node_bricks:
+        piece_groups.append(("lone", lone_node_bricks))
 
     # ── Step 7: edge positions for floor arrows ───────────────────────────
     edge_positions: list[tuple] = []
@@ -345,4 +378,4 @@ def build_ldr_scene(
                 np.array([float(hlx), 0.0, float(hlz)]),
             ))
 
-    return pieces, edge_positions, node_data
+    return pieces, edge_positions, node_data, piece_groups

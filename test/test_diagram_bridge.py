@@ -188,30 +188,41 @@ class TestMedianNnDist:
 # ---------------------------------------------------------------------------
 
 class TestBuildLdrSceneStructure:
-    def test_returns_three_values(self):
-        assert len(build_ldr_scene(_lone_graph())) == 3
+    def test_returns_four_values(self):
+        assert len(build_ldr_scene(_lone_graph())) == 4
 
     def test_pieces_is_list(self):
-        pieces, _, _ = build_ldr_scene(_lone_graph())
+        pieces, _, _, _ = build_ldr_scene(_lone_graph())
         assert isinstance(pieces, list)
 
     def test_arrows_is_list(self):
-        _, arrows, _ = build_ldr_scene(_lone_graph())
+        _, arrows, _, _ = build_ldr_scene(_lone_graph())
         assert isinstance(arrows, list)
 
     def test_node_data_is_list(self):
-        _, _, node_data = build_ldr_scene(_lone_graph())
+        _, _, node_data, _ = build_ldr_scene(_lone_graph())
         assert isinstance(node_data, list)
 
     def test_node_data_count_matches_nodes(self):
-        _, _, node_data = build_ldr_scene(_lone_graph())
+        _, _, node_data, _ = build_ldr_scene(_lone_graph())
         assert len(node_data) == 2
 
+    def test_piece_groups_is_list(self):
+        _, _, _, piece_groups = build_ldr_scene(_lone_graph())
+        assert isinstance(piece_groups, list)
+
+    def test_piece_groups_entries_are_tuples(self):
+        _, _, _, piece_groups = build_ldr_scene(_lone_graph())
+        for name, grp in piece_groups:
+            assert isinstance(name, str)
+            assert isinstance(grp, list)
+
     def test_empty_graph_returns_empty(self):
-        pieces, arrows, node_data = build_ldr_scene({"objects": [], "edges": []})
+        pieces, arrows, node_data, piece_groups = build_ldr_scene({"objects": [], "edges": []})
         assert pieces == []
         assert arrows == []
         assert node_data == []
+        assert piece_groups == []
 
 
 # ---------------------------------------------------------------------------
@@ -220,7 +231,7 @@ class TestBuildLdrSceneStructure:
 
 class TestBuildLdrSceneLoneNodes:
     def setup_method(self):
-        self.pieces, self.arrows, self.node_data = build_ldr_scene(_lone_graph())
+        self.pieces, self.arrows, self.node_data, self.piece_groups = build_ldr_scene(_lone_graph())
         self.bricks = [p for p in self.pieces if p.part == "3003"]
 
     def test_two_bricks_created(self):
@@ -253,7 +264,7 @@ class TestBuildLdrSceneLoneNodes:
 
 class TestBuildLdrSceneCluster:
     def setup_method(self):
-        self.pieces, self.arrows, self.node_data = build_ldr_scene(_cluster_graph())
+        self.pieces, self.arrows, self.node_data, self.piece_groups = build_ldr_scene(_cluster_graph())
         self.bricks = [p for p in self.pieces if p.part == "3003"]
         self.plates = [p for p in self.pieces if p.part == "3024"]
 
@@ -291,7 +302,7 @@ class TestBuildLdrSceneCluster:
 
 class TestBuildLdrSceneNestedCluster:
     def setup_method(self):
-        self.pieces, _, self.node_data = build_ldr_scene(_nested_cluster_graph())
+        self.pieces, _, self.node_data, _ = build_ldr_scene(_nested_cluster_graph())
         self.bricks = [p for p in self.pieces if p.part == "3003"]
 
     def test_deep_node_uses_innermost_cluster_color(self):
@@ -317,7 +328,7 @@ class TestLoneNodeDisplacement:
     """Lone nodes that overlap a cluster platform must be pushed outside."""
 
     def setup_method(self):
-        self.pieces, _, self.node_data = build_ldr_scene(_overlapping_graph())
+        self.pieces, _, self.node_data, _ = build_ldr_scene(_overlapping_graph())
         self.bricks = [p for p in self.pieces if p.part == "3003"]
 
     def _platform_box(self):
@@ -357,34 +368,34 @@ class TestLoneNodeDisplacement:
 
 class TestBuildLdrSceneEdges:
     def test_edge_count_matches_graph(self):
-        _, arrows, _ = build_ldr_scene(_lone_graph())
+        _, arrows, _, _ = build_ldr_scene(_lone_graph())
         assert len(arrows) == 1
 
     def test_arrow_positions_at_floor_y(self):
-        _, arrows, _ = build_ldr_scene(_lone_graph())
+        _, arrows, _, _ = build_ldr_scene(_lone_graph())
         for from_pos, to_pos in arrows:
             assert from_pos[1] == pytest.approx(0.0)
             assert to_pos[1] == pytest.approx(0.0)
 
     def test_arrow_endpoints_differ(self):
-        _, arrows, _ = build_ldr_scene(_lone_graph())
+        _, arrows, _, _ = build_ldr_scene(_lone_graph())
         from_pos, to_pos = arrows[0]
         assert not np.allclose(from_pos, to_pos)
 
     def test_arrow_positions_are_arrays(self):
-        _, arrows, _ = build_ldr_scene(_lone_graph())
+        _, arrows, _, _ = build_ldr_scene(_lone_graph())
         for from_pos, to_pos in arrows:
             assert isinstance(from_pos, np.ndarray)
             assert isinstance(to_pos, np.ndarray)
 
     def test_no_edges_means_no_arrows(self):
         graph = {**_lone_graph(), "edges": []}
-        _, arrows, _ = build_ldr_scene(graph)
+        _, arrows, _, _ = build_ldr_scene(graph)
         assert arrows == []
 
     def test_edge_to_unknown_gvid_skipped(self):
         graph = {**_lone_graph(), "edges": [{"tail": 0, "head": 99}]}
-        _, arrows, _ = build_ldr_scene(graph)
+        _, arrows, _, _ = build_ldr_scene(graph)
         assert arrows == []
 
 
@@ -394,7 +405,7 @@ class TestBuildLdrSceneEdges:
 
 class TestBuildLdrSceneNodeData:
     def setup_method(self):
-        _, _, self.node_data = build_ldr_scene(_lone_graph())
+        _, _, self.node_data, _ = build_ldr_scene(_lone_graph())
 
     def test_half_w_is_20(self):
         for nd in self.node_data:
@@ -419,7 +430,7 @@ class TestBuildLdrSceneNodeData:
             "objects": [{"_gvid": 0, "pos": "0,0", "image": "", "label": ""}],
             "edges": [],
         }
-        _, _, node_data = build_ldr_scene(graph)
+        _, _, node_data, _ = build_ldr_scene(graph)
         assert node_data[0]["label"] == ""
 
     def test_node_without_image_gets_none(self):
@@ -427,5 +438,53 @@ class TestBuildLdrSceneNodeData:
             "objects": [{"_gvid": 0, "pos": "0,0", "image": "", "label": "x"}],
             "edges": [],
         }
-        _, _, node_data = build_ldr_scene(graph)
+        _, _, node_data, _ = build_ldr_scene(graph)
         assert node_data[0]["icon_path"] is None
+
+
+# ---------------------------------------------------------------------------
+# build_ldr_scene — piece_groups structure
+# ---------------------------------------------------------------------------
+
+class TestPieceGroups:
+    def test_lone_graph_has_lone_group(self):
+        _, _, _, piece_groups = build_ldr_scene(_lone_graph())
+        names = [name for name, _ in piece_groups]
+        assert "lone" in names
+
+    def test_lone_group_contains_both_bricks(self):
+        _, _, _, piece_groups = build_ldr_scene(_lone_graph())
+        lone = next(grp for name, grp in piece_groups if name == "lone")
+        assert len(lone) == 2
+
+    def test_cluster_graph_has_cluster_group(self):
+        _, _, _, piece_groups = build_ldr_scene(_cluster_graph())
+        names = [name for name, _ in piece_groups]
+        assert "cluster_A" in names
+
+    def test_cluster_group_contains_platform_tiles(self):
+        _, _, _, piece_groups = build_ldr_scene(_cluster_graph())
+        cluster_grp = next(grp for name, grp in piece_groups if name == "cluster_A")
+        tiles = [p for p in cluster_grp if p.part == "3024"]
+        assert len(tiles) > 0
+
+    def test_cluster_group_contains_node_brick(self):
+        _, _, _, piece_groups = build_ldr_scene(_cluster_graph())
+        cluster_grp = next(grp for name, grp in piece_groups if name == "cluster_A")
+        bricks = [p for p in cluster_grp if p.part == "3003"]
+        assert len(bricks) == 1
+
+    def test_cluster_group_before_lone_group(self):
+        _, _, _, piece_groups = build_ldr_scene(_cluster_graph())
+        names = [name for name, _ in piece_groups]
+        assert names.index("cluster_A") < names.index("lone")
+
+    def test_outer_cluster_before_inner_cluster(self):
+        _, _, _, piece_groups = build_ldr_scene(_nested_cluster_graph())
+        names = [name for name, _ in piece_groups]
+        assert names.index("cluster_A") < names.index("cluster_B")
+
+    def test_all_pieces_covered_by_groups(self):
+        pieces, _, _, piece_groups = build_ldr_scene(_cluster_graph())
+        grouped = {id(p) for _, grp in piece_groups for p in grp}
+        assert all(id(p) in grouped for p in pieces)

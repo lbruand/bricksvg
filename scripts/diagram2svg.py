@@ -39,7 +39,7 @@ def main() -> None:
     graph = extract_graph(str(input_path))
 
     print("Building LDraw scene …")
-    pieces, arrows, node_data = build_ldr_scene(graph)
+    pieces, arrows, node_data, piece_groups = build_ldr_scene(graph)
     print(f"  {len(pieces)} pieces, {len(arrows)} edges, {len(node_data)} nodes")
 
     tmpdir = Path(tempfile.mkdtemp(prefix="diagram2svg_"))
@@ -50,7 +50,7 @@ def main() -> None:
         print("No pieces rendered — nothing to compose.", file=sys.stderr)
         return
 
-    compose_diagram_svg(renders, output_path, arrows, node_data)
+    compose_diagram_svg(renders, output_path, arrows, node_data, piece_groups=piece_groups)
 
     if not args.keep_pngs:
         try:
