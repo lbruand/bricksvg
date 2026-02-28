@@ -11,6 +11,7 @@ from ldr2svg.projection import project_ldraw
 from ldr2svg.compose import (
     _piece_label, _project_piece, _project_pieces,
     _canvas_bounds, _build_defs, _inject_def_comments,
+    _make_dwg_image, compose_svg,
 )
 
 LDR_PATH = Path(__file__).parent.parent / "test.ldr"
@@ -137,6 +138,53 @@ class TestInjectDefComments:
         _inject_def_comments(str(svg), {"first": ("x", 0.0, 0.0), "second": ("y", 0.0, 0.0)})
         result = svg.read_text()
         assert result.index("<!-- first -->") < result.index("<!-- second -->")
+
+
+class TestMakeDwgImage:
+    def test_returns_tuple_of_four(self, tmp_path):
+        dwg = svgwrite.Drawing(str(tmp_path / "t.svg"))
+        result = _make_dwg_image("3003 color=4 rot=[[1,0,0]]", Image.new("RGBA", (100, 80)), 12.5, 7.3, dwg)
+        assert len(result) == 4
+
+    def test_def_id_starts_with_part_name(self, tmp_path):
+        dwg = svgwrite.Drawing(str(tmp_path / "t.svg"))
+        def_id, _, _, _ = _make_dwg_image("3666 color=1 rot=...", Image.new("RGBA", (50, 50)), 0, 0, dwg)
+        assert def_id.startswith("3666-")
+
+    def test_anchors_preserved(self, tmp_path):
+        dwg = svgwrite.Drawing(str(tmp_path / "t.svg"))
+        _, ax, ay, _ = _make_dwg_image("3003 color=4 rot=...", Image.new("RGBA", (100, 80)), 12.5, 7.3, dwg)
+        assert ax == pytest.approx(12.5)
+        assert ay == pytest.approx(7.3)
+
+    def test_def_id_has_hash_suffix(self, tmp_path):
+        dwg = svgwrite.Drawing(str(tmp_path / "t.svg"))
+        def_id, _, _, _ = _make_dwg_image("3003 color=4 rot=...", Image.new("RGBA", (10, 10)), 0, 0, dwg)
+        suffix = def_id.split("-", 1)[1]
+        assert len(suffix) == 8
+        assert all(c in "0123456789abcdef" for c in suffix)
+
+
+class TestComposeSvg:
+    def test_creates_svg_file(self, tmp_path):
+        out = str(tmp_path / "out.svg")
+        compose_svg(_make_renders(), out)
+        assert Path(out).exists()
+
+    def test_svg_contains_use_elements(self, tmp_path):
+        out = str(tmp_path / "out.svg")
+        compose_svg(_make_renders(), out)
+        assert "<use" in Path(out).read_text()
+
+    def test_svg_has_defs(self, tmp_path):
+        out = str(tmp_path / "out.svg")
+        compose_svg(_make_renders(), out)
+        assert "<defs>" in Path(out).read_text()
+
+    def test_svg_contains_def_comments(self, tmp_path):
+        out = str(tmp_path / "out.svg")
+        compose_svg(_make_renders(), out)
+        assert "<!--" in Path(out).read_text()
 
 
 class TestZOrderSort:

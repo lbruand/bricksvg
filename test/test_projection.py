@@ -20,7 +20,7 @@ from PIL import Image, ImageDraw
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from ldr2svg.parts import parse_ldr, PART_MAP, ldraw_rgb
-from ldr2svg.projection import _T, LDU_TO_MM, PX_PER_MM, CAMERA_RX, CAMERA_RZ, CAMERA_D, IMG_PX, project_ldraw
+from ldr2svg.projection import _T, LDU_TO_MM, PX_PER_MM, CAMERA_RX, CAMERA_RZ, CAMERA_D, IMG_PX, project_ldraw, ldraw_to_os, _cam_matrix
 from ldr2svg.scad import LEGOLIB
 
 # ---------------------------------------------------------------------------
@@ -43,6 +43,48 @@ class TestProjectLdraw:
         _, sy_low,  _ = project_ldraw(np.array([0.0, -8.0,  0.0]))
         _, sy_high, _ = project_ldraw(np.array([0.0, -32.0, 0.0]))
         assert sy_high < sy_low
+
+
+class TestCamMatrix:
+    def test_returns_3x3(self):
+        assert _cam_matrix(0, 0).shape == (3, 3)
+
+    def test_zero_angles_is_identity(self):
+        assert np.allclose(_cam_matrix(0, 0), np.eye(3))
+
+    def test_nonzero_angles_not_identity(self):
+        assert not np.allclose(_cam_matrix(45, 45), np.eye(3))
+
+    def test_result_is_orthogonal(self):
+        R = _cam_matrix(CAMERA_RX, CAMERA_RZ)
+        assert np.allclose(R @ R.T, np.eye(3), atol=1e-9)
+
+    def test_determinant_is_one(self):
+        R = _cam_matrix(CAMERA_RX, CAMERA_RZ)
+        assert np.linalg.det(R) == pytest.approx(1.0, abs=1e-9)
+
+
+class TestLdrawToOs:
+    def test_returns_4x4(self):
+        assert ldraw_to_os(np.zeros(3), np.eye(3)).shape == (4, 4)
+
+    def test_origin_maps_to_zero_translation(self):
+        m = ldraw_to_os(np.zeros(3), np.eye(3))
+        assert np.allclose(m[:3, 3], np.zeros(3))
+
+    def test_bottom_row_is_homogeneous(self):
+        m = ldraw_to_os(np.array([5.0, -10.0, 3.0]), np.eye(3))
+        assert np.allclose(m[3], [0, 0, 0, 1])
+
+    def test_translation_scaled_to_mm(self):
+        # LDraw X=10 → OpenSCAD X = 10 * LDU_TO_MM = 4.0
+        m = ldraw_to_os(np.array([10.0, 0.0, 0.0]), np.eye(3))
+        assert m[0, 3] == pytest.approx(10.0 * LDU_TO_MM)
+
+    def test_identity_rotation_preserved(self):
+        # _T @ I @ _T = _T² = I
+        m = ldraw_to_os(np.zeros(3), np.eye(3))
+        assert np.allclose(m[:3, :3], np.eye(3))
 
 
 # ---------------------------------------------------------------------------

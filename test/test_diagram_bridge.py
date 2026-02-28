@@ -17,6 +17,7 @@ from ldr2svg.diagram_bridge import (
     _compute_cluster_metadata,
     _layout_positions,
     _compute_platform_extents,
+    _first_overlapping_extent,
     _displace_lone_nodes,
     _build_node_pieces,
     _build_platform_pieces,
@@ -901,6 +902,7 @@ class TestAssemblePieceGroups:
         assert groups == []
 
     def test_no_lone_group_when_no_lone_bricks(self):
+
         cluster_objs  = [{"_gvid": 0, "nodes": [1], "name": "cluster_A"}]
         cluster_depth = {"cluster_A": 0}
         groups = _assemble_piece_groups(
@@ -943,3 +945,34 @@ class TestBuildEdgePositions:
 
     def test_empty_edges(self):
         assert _build_edge_positions([], {0: (0, 0)}) == []
+
+
+# ---------------------------------------------------------------------------
+# Step: _first_overlapping_extent
+# ---------------------------------------------------------------------------
+
+class TestFirstOverlappingExtent:
+    def test_no_extents_returns_none(self):
+        assert _first_overlapping_extent(0, 0, []) is None
+
+    def test_non_overlapping_returns_none(self):
+        # brick at (200,0), platform at (-40,40,-40,40) — far apart
+        assert _first_overlapping_extent(200, 0, [(-40, 40, -40, 40)]) is None
+
+    def test_overlapping_returns_extent(self):
+        ext = (-40, 40, -40, 40)
+        assert _first_overlapping_extent(0, 0, [ext]) == ext
+
+    def test_just_touching_not_overlapping(self):
+        # brick right edge at ldx+TILE=40, platform left edge at 40 → strict inequality fails
+        assert _first_overlapping_extent(20, 0, [(40, 80, -40, 40)]) is None
+
+    def test_returns_first_of_multiple(self):
+        ext1 = (-40, 40, -40, 40)
+        ext2 = (-60, 60, -60, 60)
+        assert _first_overlapping_extent(0, 0, [ext1, ext2]) is ext1
+
+    def test_z_axis_overlap_detected(self):
+        # brick at (200, 0) overlaps z-wise with platform (180, 220, -40, 40)
+        ext = (180, 220, -40, 40)
+        assert _first_overlapping_extent(200, 0, [ext]) == ext
