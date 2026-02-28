@@ -151,6 +151,20 @@ def build_ldr_scene(
     tile      = 20  # 20 LDU = 1 stud = one 1×1 tile width
     max_depth = max(cluster_depth.values(), default=0)
 
+    # Direct parent of each cluster: the smallest cluster whose node set
+    # strictly contains this one.  Used to clip child platforms so they never
+    # spill into sibling territory.
+    cluster_parent: dict[str, str | None] = {}
+    for cl in cluster_objs:
+        containing = [
+            other["name"] for other in cluster_objs
+            if cluster_node_sets[other["name"]] > cluster_node_sets[cl["name"]]
+        ]
+        cluster_parent[cl["name"]] = (
+            min(containing, key=lambda n: len(cluster_node_sets[n]))
+            if containing else None
+        )
+
     # ── Step 2: normalize graphviz positions to LDraw grid ────────────────
     # Graphviz pos string is "x,y" in points (1 pt = 1/72 inch).
     # We scale so median nearest-neighbour distance ≥ 80 LDU (4 studs),
@@ -169,50 +183,92 @@ def build_ldr_scene(
         gy = float(obj["pos"].split(",")[1])
         gvid_to_ld[obj["_gvid"]] = (snap(gx), snap(-gy))  # negate Y: gv↑ → LDraw -Z
 
+    # ── Step 2c: pre-compute sibling-bounded, parent-clipped platform extents ─
+    # Build per-cluster node-position lists (only nodes with LDraw positions).
+    cluster_node_xs: dict[str, list[int]] = {}
+    cluster_node_zs: dict[str, list[int]] = {}
+    for cl in cluster_objs:
+        cl_ld = [g for g in cl["nodes"] if g in gvid_to_ld]
+        if cl_ld:
+            cluster_node_xs[cl["name"]] = [gvid_to_ld[g][0] for g in cl_ld]
+            cluster_node_zs[cl["name"]] = [gvid_to_ld[g][1] for g in cl_ld]
+
+    # Process outermost-first so parent extents exist when children are clipped.
+    # Additionally cap each cluster's extent at the midpoint to the nearest
+    # sibling node so that sibling platforms never overlap (e.g. Pods ⊄ MySQL).
+    cluster_tile_extent: dict[str, tuple[int, int, int, int]] = {}
+    for d in range(max_depth + 1):
+        depth_clusters = [cl for cl in cluster_objs if cluster_depth[cl["name"]] == d]
+        for cl in depth_clusters:
+            name = cl["name"]
+            if name not in cluster_node_xs:
+                continue
+            xs  = cluster_node_xs[name]
+            zs  = cluster_node_zs[name]
+            pad = tile * (max_depth - d + 2)
+            x0 = math.floor((min(xs) - pad) / tile) * tile
+            x1 = math.ceil ((max(xs) + pad) / tile) * tile
+            z0 = math.floor((min(zs) - pad) / tile) * tile
+            z1 = math.ceil ((max(zs) + pad) / tile) * tile
+
+            # Cap at midpoint to each sibling (same parent, same depth).
+            for sib in depth_clusters:
+                sib_name = sib["name"]
+                if sib_name == name or sib_name not in cluster_node_xs:
+                    continue
+                if cluster_parent[sib_name] != cluster_parent[name]:
+                    continue
+                sib_xs = cluster_node_xs[sib_name]
+                sib_zs = cluster_node_zs[sib_name]
+                if min(sib_xs) > max(xs):   # sibling is to the right
+                    mid = math.floor((max(xs) + min(sib_xs)) / 2 / tile) * tile
+                    x1 = min(x1, mid)
+                elif max(sib_xs) < min(xs): # sibling is to the left
+                    mid = math.ceil((max(sib_xs) + min(xs)) / 2 / tile) * tile
+                    x0 = max(x0, mid)
+                if min(sib_zs) > max(zs):   # sibling is further back
+                    mid = math.floor((max(zs) + min(sib_zs)) / 2 / tile) * tile
+                    z1 = min(z1, mid)
+                elif max(sib_zs) < min(zs): # sibling is in front
+                    mid = math.ceil((max(sib_zs) + min(zs)) / 2 / tile) * tile
+                    z0 = max(z0, mid)
+
+            # Clip to parent's tile extent.
+            parent = cluster_parent[name]
+            if parent and parent in cluster_tile_extent:
+                px0, px1, pz0, pz1 = cluster_tile_extent[parent]
+                x0, x1 = max(x0, px0), min(x1, px1)
+                z0, z1 = max(z0, pz0), min(z1, pz1)
+
+            cluster_tile_extent[name] = (x0, x1, z0, z1)
+
     # ── Step 2b: push lone nodes outside cluster platform footprints ───────
     # A lone node whose 2×2 brick footprint (center ±20 LDU) overlaps a cluster
     # platform is displaced to the nearer outside edge plus one-stud clearance.
-    if cluster_objs:
-        platform_boxes: list[tuple[int, int, int, int]] = []
-        for cl in cluster_objs:
-            cl_ld = [g for g in cl["nodes"] if g in gvid_to_ld]
-            if not cl_ld:
+    for gvid in list(gvid_to_ld):
+        if gvid in node_cluster:
+            continue  # clustered nodes sit on their platform intentionally
+        ldx, ldz = gvid_to_ld[gvid]
+        for px0, px1, pz0, pz1 in cluster_tile_extent.values():
+            bx0, bx1 = ldx - 20, ldx + 20
+            bz0, bz1 = ldz - 20, ldz + 20
+            if not (bx0 < px1 and bx1 > px0 and bz0 < pz1 and bz1 > pz0):
                 continue
-            xs  = [gvid_to_ld[g][0] for g in cl_ld]
-            zs  = [gvid_to_ld[g][1] for g in cl_ld]
-            d   = cluster_depth[cl["name"]]
-            pad = tile * (max_depth - d + 2)
-            platform_boxes.append((
-                math.floor((min(xs) - pad) / tile) * tile,
-                math.ceil ((max(xs) + pad) / tile) * tile,
-                math.floor((min(zs) - pad) / tile) * tile,
-                math.ceil ((max(zs) + pad) / tile) * tile,
-            ))
-
-        for gvid in list(gvid_to_ld):
-            if gvid in node_cluster:
-                continue  # clustered nodes sit on their platform intentionally
-            ldx, ldz = gvid_to_ld[gvid]
-            for px0, px1, pz0, pz1 in platform_boxes:
-                bx0, bx1 = ldx - 20, ldx + 20
-                bz0, bz1 = ldz - 20, ldz + 20
-                if not (bx0 < px1 and bx1 > px0 and bz0 < pz1 and bz1 > pz0):
-                    continue
-                # Move to the nearest edge (+1-stud clearance so brick clears it)
-                dx_left = ldx - px0
-                dx_right = px1 - ldx
-                dz_near = ldz - pz0
-                dz_far  = pz1 - ldz
-                if min(dx_left, dx_right) <= min(dz_near, dz_far):
-                    ldx = round(
-                        (px0 - 40 if dx_left <= dx_right else px1 + 40) / 20
-                    ) * 20
-                else:
-                    ldz = round(
-                        (pz0 - 40 if dz_near <= dz_far else pz1 + 40) / 20
-                    ) * 20
-                gvid_to_ld[gvid] = (ldx, ldz)
-                break
+            # Move to the nearest edge (+1-stud clearance so brick clears it)
+            dx_left = ldx - px0
+            dx_right = px1 - ldx
+            dz_near = ldz - pz0
+            dz_far  = pz1 - ldz
+            if min(dx_left, dx_right) <= min(dz_near, dz_far):
+                ldx = round(
+                    (px0 - 40 if dx_left <= dx_right else px1 + 40) / 20
+                ) * 20
+            else:
+                ldz = round(
+                    (pz0 - 40 if dz_near <= dz_far else pz1 + 40) / 20
+                ) * 20
+            gvid_to_ld[gvid] = (ldx, ldz)
+            break
 
     # ── Steps 3–4: node pieces ────────────────────────────────────────────
     # LDraw Y convention: floor = Y=0; pieces above floor have negative Y.
@@ -258,20 +314,11 @@ def build_ldr_scene(
     # → each outer level adds one stud, so the border between adjacent levels
     #   is exactly 1 stud.
     for cl in cluster_objs:
-        cl_gvids = [g for g in cl["nodes"] if g in gvid_to_ld]
-        if not cl_gvids:
+        if cl["name"] not in cluster_tile_extent:
             continue
+        x0s, x1s, z0s, z1s = cluster_tile_extent[cl["name"]]
 
-        cl_xs = [gvid_to_ld[g][0] for g in cl_gvids]
-        cl_zs = [gvid_to_ld[g][1] for g in cl_gvids]
-
-        depth = cluster_depth[cl["name"]]
-        pad   = tile * (max_depth - depth + 2)
-        x0s = math.floor((min(cl_xs) - pad) / tile) * tile
-        x1s = math.ceil ((max(cl_xs) + pad) / tile) * tile
-        z0s = math.floor((min(cl_zs) - pad) / tile) * tile
-        z1s = math.ceil ((max(cl_zs) + pad) / tile) * tile
-
+        depth   = cluster_depth[cl["name"]]
         plate_y = float(-(depth + 1) * _PLATE_H_LDU)
         cl_c    = cluster_color.get(cl["name"], 15)
 
