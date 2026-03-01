@@ -12,7 +12,6 @@ from ldr2svg.compose import _piece_label
 from ldr2svg.diagram_compose import (
     _proj_canvas,
     _arrow_polygon_3d,
-    _make_iso_arrow,
     _draw_floor_arrows,
     _draw_icons,
     _draw_labels,

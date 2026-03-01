@@ -2,10 +2,8 @@
 
 from pathlib import Path
 
-import pytest
 
 from ldr2svg.mermaid_bridge import (
-    _Cluster,
     _parse_mermaid,
     _parse_node_token,
     _parse_edge,
