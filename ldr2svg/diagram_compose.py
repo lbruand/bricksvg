@@ -210,17 +210,22 @@ def _draw_cluster_labels(
     for nd in (n for n in cluster_data if n.get("label", "")):
         pos = nd["pos"]
         lx, ly = _proj_canvas(pos, cx, cy)
+        # Shift f (screen-Y translation) to vertically centre the glyphs on the
+        # tile. b+d=1 so adding δ to f produces a pure +δ px screen-Y shift.
+        # Em-centre sits ≈ 0.4×fs above the baseline; after the matrix (d=0.5)
+        # that puts the visual centre 0.5×0.4×fs = 0.2×fs px above the anchor.
+        _font_size = 40
+        ly += _font_size * 0.2
         text_el = dwg.text(
             nd["label"],
             insert=(0, 0),
-            font_size="40",
+            font_size=str(_font_size),
             font_weight="bold",
             fill="#444",
             text_anchor="middle",
         )
-        # Top-face isometric transform: text runs along +X, character height
-        # projects along +Z (toward viewer) so glyphs lie flat on the surface.
-        # matrix(a,b,c,d,e,f): col1=(a,b)=+X dir, col2=(c,d)=+Z dir
+        # Top-face isometric matrix: col1=(a,b)=+X dir, col2=(c,d)=+Z dir.
+        # Glyphs lie flat on the horizontal tile surface.
         text_el.attribs["transform"] = (
             f"matrix(0.866025,0.5,-0.866025,0.5,{lx:.1f},{ly:.1f})"
         )
