@@ -141,6 +141,14 @@ def main() -> None:
                         help="Keep per-piece PNGs in a tmp directory")
     parser.add_argument("-j", "--workers", type=int, default=None,
                         help="Parallel render workers (default: cpu count)")
+    parser.add_argument(
+        "--masked", action="store_true",
+        help=(
+            "Colourise at SVG composition time via alpha mask + "
+            "mix-blend-mode:multiply instead of PIL pre-colorisation "
+            "(browser/Inkscape only, not supported in LibreOffice)."
+        ),
+    )
     args = parser.parse_args()
 
     input_path  = Path(args.input)
@@ -158,10 +166,13 @@ def main() -> None:
         print("No pieces rendered — nothing to compose.", file=sys.stderr)
         return
 
-    print("Colorising renders with PIL …")
-    renders = colorize_renders(white_renders)
+    if args.masked:
+        renders = white_renders
+    else:
+        print("Colorising renders with PIL …")
+        renders = colorize_renders(white_renders)
 
-    compose_svg(renders, output_path, padding=60)
+    compose_svg(renders, output_path, padding=60, masked=args.masked)
 
     if not args.keep_pngs:
         tmpdir.rmdir()

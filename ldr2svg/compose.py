@@ -12,7 +12,7 @@ import svgwrite.container
 import svgwrite.image
 from PIL import Image
 
-from .parts import Piece
+from .parts import Piece, ldraw_rgb
 from .projection import project_ldraw, PX_PER_MM
 from .grid import _grid_params, _grid_corner_sx_sy, _draw_isometric_grid
 
@@ -189,13 +189,17 @@ def compose_svg(
     renders: dict[str, tuple[Image.Image, float, float, list[Piece]]],
     output: str,
     padding: int = 60,
+    masked: bool = False,
 ) -> None:
     pngs: list[tuple[Piece, int, int, float, float]] = [
         (piece, *img.size, ax, ay)
         for img, ax, ay, piece_list in renders.values()
         for piece in piece_list
     ]
-    projected = _project_pieces(pngs)
+    if masked:
+        projected = _project_pieces(pngs, label_fn=_piece_label_no_color)
+    else:
+        projected = _project_pieces(pngs)
 
     grid = _grid_params(renders)
     grid_corners = _grid_corner_sx_sy(*grid) if grid else []
@@ -212,12 +216,40 @@ def compose_svg(
         fy, gx0, gx1, gz0, gz1 = grid
         _draw_isometric_grid(dwg, fy, gx0, gx1, gz0, gz1, cx, cy)
 
-    defs = _build_defs(dwg, renders)
+    if masked:
+        defs_m = _build_defs_masked(dwg, renders)
+        piece_proj = {
+            id(p): _project_piece(p, iw, ih, ax, ay, label_fn=_piece_label_no_color)
+            for p, iw, ih, ax, ay in pngs
+        }
+        # (label, sx_px) → piece — used to recover colour when placing
+        lsx_to_piece: dict[tuple[str, float], Piece] = {
+            (row[8], row[2]): p
+            for p, *_ in pngs
+            for row in (piece_proj[id(p)],)
+        }
+        for sx_px, sy_px, _, _, _, _, label in projected:
+            piece = lsx_to_piece[(label, sx_px)]
+            shadow_id, mask_id, dax, day, iw, ih = defs_m[label]
+            r, g, b = ldraw_rgb(piece.color)
+            x = f"{cx(sx_px) - dax:.1f}"
+            y = f"{cy(sy_px) - day:.1f}"
+            grp = dwg.g(style="isolation: isolate", transform=f"translate({x},{y})")
+            rect = dwg.rect(insert=("0", "0"), size=(str(iw), str(ih)),
+                            fill=f"#{r:02x}{g:02x}{b:02x}")
+            rect.attribs["mask"] = f"url(#{mask_id})"
+            grp.add(rect)
+            use_el = dwg.use(f"#{shadow_id}")
+            use_el.attribs["style"] = "mix-blend-mode: multiply"
+            grp.add(use_el)
+            dwg.add(grp)
+        dwg.save(pretty=True)
+    else:
+        defs = _build_defs(dwg, renders)
+        for sx_px, sy_px, _, _, _, _, label in projected:
+            def_id, ax, ay = defs[label]
+            dwg.add(dwg.use(f"#{def_id}", insert=(f"{cx(sx_px) - ax:.1f}px", f"{cy(sy_px) - ay:.1f}px")))
+        dwg.save(pretty=True)
+        _inject_def_comments(output, defs)
 
-    for sx_px, sy_px, _, _, _, _, label in projected:
-        def_id, ax, ay = defs[label]
-        dwg.add(dwg.use(f"#{def_id}", insert=(f"{cx(sx_px) - ax:.1f}px", f"{cy(sy_px) - ay:.1f}px")))
-
-    dwg.save(pretty=True)
-    _inject_def_comments(output, defs)
     print(f"Saved: {output}  ({W}×{H} px, {len(projected)} pieces)")
