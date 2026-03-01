@@ -318,7 +318,7 @@ def _build_node_pieces(
     node_data: list[dict] = []
     cluster_node_bricks: dict[str, list[Piece]] = {}
     lone_node_bricks: list[Piece] = []
-    gvid_to_mid_y: dict[int, float] = {}
+    gvid_to_top_y: dict[int, float] = {}
 
     for obj in node_objs:
         gvid = obj["_gvid"]
@@ -349,14 +349,14 @@ def _build_node_pieces(
             "half_w":    _TILE_LDU,                       # 20 LDU = half the 2×2 footprint
             "half_h":    (_PLATE_H_LDU + _BRICK_H_LDU) // 2,  # 16 LDU = half the total height
         })
-        gvid_to_mid_y[gvid] = node_y + _BRICK_H_LDU / 2  # mid of brick body for arrows
+        gvid_to_top_y[gvid] = tile_y  # top face of the tile — arc arrow origin/destination
 
         if in_cluster:
             cluster_node_bricks.setdefault(node_cluster[gvid], []).extend([piece, tile])
         else:
             lone_node_bricks.extend([piece, tile])
 
-    return pieces, node_data, cluster_node_bricks, lone_node_bricks, gvid_to_mid_y
+    return pieces, node_data, cluster_node_bricks, lone_node_bricks, gvid_to_top_y
 
 
 def _build_platform_pieces(
@@ -510,16 +510,29 @@ def _build_cluster_label_data(
     return result
 
 
+def _tile_edge_offset(dx: float, dz: float) -> tuple[float, float]:
+    """XZ offset from the centre of a tile to its edge in direction (dx, dz).
+
+    Uses the square-edge formula: distance = half_w / max(|ux|, |uz|).
+    Returns (0, 0) if the direction vector is zero.
+    """
+    dist = math.hypot(dx, dz)
+    if dist < 1e-9:
+        return 0.0, 0.0
+    ux, uz = dx / dist, dz / dist
+    d = _TILE_LDU / max(abs(ux), abs(uz))
+    return ux * d, uz * d
+
+
 def _build_edge_positions(
     edges: list[dict],
     gvid_to_ld: dict[int, tuple[int, int]],
-    gvid_to_mid_y: dict[int, float],
+    gvid_to_top_y: dict[int, float],
 ) -> list[tuple]:
     """Map graphviz edges to LDraw ``(from_pos, to_pos)`` pairs.
 
-    Each endpoint is placed at the centre of the side face of the brick that
-    faces the other node: mid-height in Y and offset by ``_TILE_LDU`` (half
-    the 2×2 brick width) along the XZ direction toward the destination.
+    Each endpoint is on the edge of the node tile's top face, offset from the
+    centre toward the other node, so arc arrows start and end at the tile rim.
     """
     edge_positions: list[tuple] = []
     for e in edges:
@@ -528,12 +541,10 @@ def _build_edge_positions(
         if tail_gvid in gvid_to_ld and head_gvid in gvid_to_ld:
             tlx, tlz = gvid_to_ld[tail_gvid]
             hlx, hlz = gvid_to_ld[head_gvid]
-            dx, dz = hlx - tlx, hlz - tlz
-            dist = math.hypot(dx, dz)
-            ux, uz = (dx / dist, dz / dist) if dist > 1e-6 else (0.0, 0.0)
+            ox, oz = _tile_edge_offset(float(hlx) - float(tlx), float(hlz) - float(tlz))
             edge_positions.append((
-                np.array([float(tlx) + ux * _TILE_LDU, gvid_to_mid_y[tail_gvid], float(tlz) + uz * _TILE_LDU]),
-                np.array([float(hlx) - ux * _TILE_LDU, gvid_to_mid_y[head_gvid], float(hlz) - uz * _TILE_LDU]),
+                np.array([float(tlx) + ox, gvid_to_top_y[tail_gvid], float(tlz) + oz]),
+                np.array([float(hlx) - ox, gvid_to_top_y[head_gvid], float(hlz) - oz]),
             ))
     return edge_positions
 
@@ -582,7 +593,7 @@ def build_ldr_scene(
 
     _displace_lone_nodes(gvid_to_ld, node_cluster, cluster_tile_extent)
 
-    node_pieces, node_data, cluster_node_bricks, lone_node_bricks, gvid_to_mid_y = _build_node_pieces(
+    node_pieces, node_data, cluster_node_bricks, lone_node_bricks, gvid_to_top_y = _build_node_pieces(
         node_objs, gvid_to_ld, node_cluster, cluster_color, cluster_depth
     )
 
@@ -607,7 +618,7 @@ def build_ldr_scene(
         cluster_objs, cluster_depth, cluster_node_bricks, cluster_platform_tiles, lone_node_bricks
     )
 
-    edge_positions = _build_edge_positions(graph.get("edges", []), gvid_to_ld, gvid_to_mid_y)
+    edge_positions = _build_edge_positions(graph.get("edges", []), gvid_to_ld, gvid_to_top_y)
 
     cluster_data = _build_cluster_label_data(cluster_objs, cluster_tile_extent, cluster_depth)
 

@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import math
+
 import numpy as np
 import pytest
 
@@ -29,6 +31,7 @@ from ldr2svg.diagram_bridge import (
     _build_cluster_label_data,
     _assemble_piece_groups,
     _build_edge_positions,
+    _tile_edge_offset,
 )
 from ldr2svg.parts import Piece
 
@@ -1071,6 +1074,37 @@ class TestAssemblePieceGroups:
 
 
 # ---------------------------------------------------------------------------
+# Helper: _tile_edge_offset
+# ---------------------------------------------------------------------------
+
+class TestTileEdgeOffset:
+    def test_pure_x_returns_tile_ldu(self):
+        ox, oz = _tile_edge_offset(_TILE_LDU * 5, 0.0)
+        assert ox == pytest.approx(_TILE_LDU)
+        assert oz == pytest.approx(0.0)
+
+    def test_pure_z_returns_tile_ldu(self):
+        ox, oz = _tile_edge_offset(0.0, _TILE_LDU * 3)
+        assert ox == pytest.approx(0.0)
+        assert oz == pytest.approx(_TILE_LDU)
+
+    def test_diagonal_hits_corner(self):
+        # 45° direction: both components equal, so d = hw / max(|ux|,|uz|) = hw/ux = hw*sqrt(2)
+        ox, oz = _tile_edge_offset(1.0, 1.0)
+        assert math.hypot(ox, oz) == pytest.approx(_TILE_LDU * math.sqrt(2), rel=1e-5)
+
+    def test_zero_vector_returns_zero(self):
+        ox, oz = _tile_edge_offset(0.0, 0.0)
+        assert ox == pytest.approx(0.0)
+        assert oz == pytest.approx(0.0)
+
+    def test_negative_direction(self):
+        ox, oz = _tile_edge_offset(-80.0, 0.0)
+        assert ox == pytest.approx(-_TILE_LDU)
+        assert oz == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
 # Step: _build_edge_positions
 # ---------------------------------------------------------------------------
 
@@ -1095,13 +1129,13 @@ class TestBuildEdgePositions:
         assert from_pos[1] == pytest.approx(-32.0)
         assert to_pos[1] == pytest.approx(-32.0)
 
-    def test_no_xz_offset(self):
-        # Endpoints are the exact node centres with no XZ displacement
+    def test_xz_offset_to_tile_edge(self):
+        # Pure X direction: tail=(0,0), head=(80,0) → offset = _TILE_LDU along X
         from_pos, to_pos = _build_edge_positions(
             [{"tail": 0, "head": 1}], {0: (0, 0), 1: (80, 0)}, self._top_y
         )[0]
-        assert from_pos[0] == pytest.approx(0.0)
-        assert to_pos[0] == pytest.approx(80.0)
+        assert from_pos[0] == pytest.approx(_TILE_LDU)
+        assert to_pos[0] == pytest.approx(80 - _TILE_LDU)
         assert from_pos[2] == pytest.approx(0.0)
         assert to_pos[2] == pytest.approx(0.0)
 
