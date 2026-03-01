@@ -218,8 +218,11 @@ def _draw_cluster_labels(
             fill="#444",
             text_anchor="middle",
         )
+        # Top-face isometric transform: text runs along +X, character height
+        # projects along +Z (toward viewer) so glyphs lie flat on the surface.
+        # matrix(a,b,c,d,e,f): col1=(a,b)=+X dir, col2=(c,d)=+Z dir
         text_el.attribs["transform"] = (
-            f"translate({lx:.1f},{ly:.1f}) rotate(30) skewX(30) scale(1,0.86603)"
+            f"matrix(0.866025,0.5,-0.866025,0.5,{lx:.1f},{ly:.1f})"
         )
         grp.add(text_el)
     dwg.add(grp)
