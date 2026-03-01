@@ -555,7 +555,7 @@ def build_ldr_scene(
     -------
     pieces
         All :class:`~ldr2svg.parts.Piece` objects (node bricks + platform
-        tiles) ready for :func:`~ldr2svg.ldr2png_svg.build_pngs`.
+        tiles) ready for :func:`~ldr2svg.ldr2png_svg.build_pngs_white`.
     edge_positions
         ``(from_pos, to_pos)`` pairs in LDraw coordinates — used to draw
         SVG floor arrows.
