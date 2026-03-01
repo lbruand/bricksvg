@@ -15,6 +15,7 @@ from ldr2svg.diagram_bridge import (
     _BRICK_H_LDU,
     _TILE_LDU,
     _NODE_TILE_PART,
+    _PLATFORM_TILE_PART,
     _parse_objects,
     _compute_cluster_metadata,
     _layout_positions,
@@ -23,6 +24,7 @@ from ldr2svg.diagram_bridge import (
     _displace_lone_nodes,
     _build_node_pieces,
     _build_platform_pieces,
+    _build_cluster_label_data,
     _assemble_piece_groups,
     _build_edge_positions,
 )
@@ -202,41 +204,42 @@ class TestMedianNnDist:
 # ---------------------------------------------------------------------------
 
 class TestBuildLdrSceneStructure:
-    def test_returns_four_values(self):
-        assert len(build_ldr_scene(_lone_graph())) == 4
+    def test_returns_five_values(self):
+        assert len(build_ldr_scene(_lone_graph())) == 5
 
     def test_pieces_is_list(self):
-        pieces, _, _, _ = build_ldr_scene(_lone_graph())
+        pieces, _, _, _, _ = build_ldr_scene(_lone_graph())
         assert isinstance(pieces, list)
 
     def test_arrows_is_list(self):
-        _, arrows, _, _ = build_ldr_scene(_lone_graph())
+        _, arrows, _, _, _ = build_ldr_scene(_lone_graph())
         assert isinstance(arrows, list)
 
     def test_node_data_is_list(self):
-        _, _, node_data, _ = build_ldr_scene(_lone_graph())
+        _, _, node_data, _, _ = build_ldr_scene(_lone_graph())
         assert isinstance(node_data, list)
 
     def test_node_data_count_matches_nodes(self):
-        _, _, node_data, _ = build_ldr_scene(_lone_graph())
+        _, _, node_data, _, _ = build_ldr_scene(_lone_graph())
         assert len(node_data) == 2
 
     def test_piece_groups_is_list(self):
-        _, _, _, piece_groups = build_ldr_scene(_lone_graph())
+        _, _, _, piece_groups, _ = build_ldr_scene(_lone_graph())
         assert isinstance(piece_groups, list)
 
     def test_piece_groups_entries_are_tuples(self):
-        _, _, _, piece_groups = build_ldr_scene(_lone_graph())
+        _, _, _, piece_groups, _ = build_ldr_scene(_lone_graph())
         for name, grp in piece_groups:
             assert isinstance(name, str)
             assert isinstance(grp, list)
 
     def test_empty_graph_returns_empty(self):
-        pieces, arrows, node_data, piece_groups = build_ldr_scene({"objects": [], "edges": []})
+        pieces, arrows, node_data, piece_groups, cluster_data = build_ldr_scene({"objects": [], "edges": []})
         assert pieces == []
         assert arrows == []
         assert node_data == []
         assert piece_groups == []
+        assert cluster_data == []
 
 
 # ---------------------------------------------------------------------------
@@ -245,14 +248,14 @@ class TestBuildLdrSceneStructure:
 
 class TestBuildLdrSceneLoneNodes:
     def setup_method(self):
-        self.pieces, self.arrows, self.node_data, self.piece_groups = build_ldr_scene(_lone_graph())
+        self.pieces, self.arrows, self.node_data, self.piece_groups, _ = build_ldr_scene(_lone_graph())
         self.bricks = [p for p in self.pieces if p.part == "3003"]
 
     def test_two_bricks_created(self):
         assert len(self.bricks) == 2
 
     def test_no_platform_plates(self):
-        assert all(p.part != "3024" for p in self.pieces)
+        assert all(p.part != _PLATFORM_TILE_PART for p in self.pieces)
 
     def test_lone_node_y_equals_negative_brick_height(self):
         for b in self.bricks:
@@ -278,9 +281,9 @@ class TestBuildLdrSceneLoneNodes:
 
 class TestBuildLdrSceneCluster:
     def setup_method(self):
-        self.pieces, self.arrows, self.node_data, self.piece_groups = build_ldr_scene(_cluster_graph())
+        self.pieces, self.arrows, self.node_data, self.piece_groups, _ = build_ldr_scene(_cluster_graph())
         self.bricks = [p for p in self.pieces if p.part == "3003"]
-        self.plates = [p for p in self.pieces if p.part == "3024"]
+        self.plates = [p for p in self.pieces if p.part == _PLATFORM_TILE_PART]
 
     def test_platform_plates_exist(self):
         assert len(self.plates) > 0
@@ -307,7 +310,7 @@ class TestBuildLdrSceneCluster:
 
     def test_plates_part_number(self):
         for plate in self.plates:
-            assert plate.part == "3024"
+            assert plate.part == _PLATFORM_TILE_PART
 
 
 # ---------------------------------------------------------------------------
@@ -316,7 +319,7 @@ class TestBuildLdrSceneCluster:
 
 class TestBuildLdrSceneNestedCluster:
     def setup_method(self):
-        self.pieces, _, self.node_data, _ = build_ldr_scene(_nested_cluster_graph())
+        self.pieces, _, self.node_data, _, _ = build_ldr_scene(_nested_cluster_graph())
         self.bricks = [p for p in self.pieces if p.part == "3003"]
 
     def test_deep_node_uses_innermost_cluster_color(self):
@@ -342,7 +345,7 @@ class TestLoneNodeDisplacement:
     """Lone nodes that overlap a cluster platform must be pushed outside."""
 
     def setup_method(self):
-        self.pieces, _, self.node_data, _ = build_ldr_scene(_overlapping_graph())
+        self.pieces, _, self.node_data, _, _ = build_ldr_scene(_overlapping_graph())
         self.bricks = [p for p in self.pieces if p.part == "3003"]
 
     def _platform_box(self):
@@ -385,11 +388,11 @@ class TestLoneNodeDisplacement:
 
 class TestBuildLdrSceneEdges:
     def test_edge_count_matches_graph(self):
-        _, arrows, _, _ = build_ldr_scene(_lone_graph())
+        _, arrows, _, _, _ = build_ldr_scene(_lone_graph())
         assert len(arrows) == 1
 
     def test_arrow_positions_at_mid_y(self):
-        _, arrows, _, _ = build_ldr_scene(_lone_graph())
+        _, arrows, _, _, _ = build_ldr_scene(_lone_graph())
         # Lone nodes → node_y = -BRICK_H_LDU; mid = node_y + BRICK_H_LDU/2
         expected_mid_y = -_BRICK_H_LDU + _BRICK_H_LDU / 2
         for from_pos, to_pos in arrows:
@@ -397,24 +400,24 @@ class TestBuildLdrSceneEdges:
             assert to_pos[1] == pytest.approx(expected_mid_y)
 
     def test_arrow_endpoints_differ(self):
-        _, arrows, _, _ = build_ldr_scene(_lone_graph())
+        _, arrows, _, _, _ = build_ldr_scene(_lone_graph())
         from_pos, to_pos = arrows[0]
         assert not np.allclose(from_pos, to_pos)
 
     def test_arrow_positions_are_arrays(self):
-        _, arrows, _, _ = build_ldr_scene(_lone_graph())
+        _, arrows, _, _, _ = build_ldr_scene(_lone_graph())
         for from_pos, to_pos in arrows:
             assert isinstance(from_pos, np.ndarray)
             assert isinstance(to_pos, np.ndarray)
 
     def test_no_edges_means_no_arrows(self):
         graph = {**_lone_graph(), "edges": []}
-        _, arrows, _, _ = build_ldr_scene(graph)
+        _, arrows, _, _, _ = build_ldr_scene(graph)
         assert arrows == []
 
     def test_edge_to_unknown_gvid_skipped(self):
         graph = {**_lone_graph(), "edges": [{"tail": 0, "head": 99}]}
-        _, arrows, _, _ = build_ldr_scene(graph)
+        _, arrows, _, _, _ = build_ldr_scene(graph)
         assert arrows == []
 
 
@@ -424,7 +427,7 @@ class TestBuildLdrSceneEdges:
 
 class TestBuildLdrSceneNodeData:
     def setup_method(self):
-        _, _, self.node_data, _ = build_ldr_scene(_lone_graph())
+        _, _, self.node_data, _, _ = build_ldr_scene(_lone_graph())
 
     def test_half_w_is_20(self):
         for nd in self.node_data:
@@ -449,7 +452,7 @@ class TestBuildLdrSceneNodeData:
             "objects": [{"_gvid": 0, "pos": "0,0", "image": "", "label": ""}],
             "edges": [],
         }
-        _, _, node_data, _ = build_ldr_scene(graph)
+        _, _, node_data, _, _ = build_ldr_scene(graph)
         assert node_data[0]["label"] == ""
 
     def test_node_without_image_gets_none(self):
@@ -457,7 +460,7 @@ class TestBuildLdrSceneNodeData:
             "objects": [{"_gvid": 0, "pos": "0,0", "image": "", "label": "x"}],
             "edges": [],
         }
-        _, _, node_data, _ = build_ldr_scene(graph)
+        _, _, node_data, _, _ = build_ldr_scene(graph)
         assert node_data[0]["icon_path"] is None
 
 
@@ -467,45 +470,45 @@ class TestBuildLdrSceneNodeData:
 
 class TestPieceGroups:
     def test_lone_graph_has_lone_group(self):
-        _, _, _, piece_groups = build_ldr_scene(_lone_graph())
+        _, _, _, piece_groups, _ = build_ldr_scene(_lone_graph())
         names = [name for name, _ in piece_groups]
         assert "lone" in names
 
     def test_lone_group_contains_brick_and_tile_per_node(self):
-        _, _, _, piece_groups = build_ldr_scene(_lone_graph())
+        _, _, _, piece_groups, _ = build_ldr_scene(_lone_graph())
         lone = next(grp for name, grp in piece_groups if name == "lone")
         # 2 nodes × (1 brick + 1 tile) = 4 pieces
         assert len(lone) == 4
 
     def test_cluster_graph_has_cluster_group(self):
-        _, _, _, piece_groups = build_ldr_scene(_cluster_graph())
+        _, _, _, piece_groups, _ = build_ldr_scene(_cluster_graph())
         names = [name for name, _ in piece_groups]
         assert "cluster_A" in names
 
     def test_cluster_group_contains_platform_tiles(self):
-        _, _, _, piece_groups = build_ldr_scene(_cluster_graph())
+        _, _, _, piece_groups, _ = build_ldr_scene(_cluster_graph())
         cluster_grp = next(grp for name, grp in piece_groups if name == "cluster_A")
-        tiles = [p for p in cluster_grp if p.part == "3024"]
+        tiles = [p for p in cluster_grp if p.part == _PLATFORM_TILE_PART]
         assert len(tiles) > 0
 
     def test_cluster_group_contains_node_brick_and_tile(self):
-        _, _, _, piece_groups = build_ldr_scene(_cluster_graph())
+        _, _, _, piece_groups, _ = build_ldr_scene(_cluster_graph())
         cluster_grp = next(grp for name, grp in piece_groups if name == "cluster_A")
         assert sum(1 for p in cluster_grp if p.part == "3003") == 1
         assert sum(1 for p in cluster_grp if p.part == _NODE_TILE_PART) == 1
 
     def test_cluster_group_before_lone_group(self):
-        _, _, _, piece_groups = build_ldr_scene(_cluster_graph())
+        _, _, _, piece_groups, _ = build_ldr_scene(_cluster_graph())
         names = [name for name, _ in piece_groups]
         assert names.index("cluster_A") < names.index("lone")
 
     def test_outer_cluster_before_inner_cluster(self):
-        _, _, _, piece_groups = build_ldr_scene(_nested_cluster_graph())
+        _, _, _, piece_groups, _ = build_ldr_scene(_nested_cluster_graph())
         names = [name for name, _ in piece_groups]
         assert names.index("cluster_A") < names.index("cluster_B")
 
     def test_all_pieces_covered_by_groups(self):
-        pieces, _, _, piece_groups = build_ldr_scene(_cluster_graph())
+        pieces, _, _, piece_groups, _ = build_ldr_scene(_cluster_graph())
         grouped = {id(p) for _, grp in piece_groups for p in grp}
         assert all(id(p) in grouped for p in pieces)
 
@@ -834,7 +837,7 @@ class TestBuildPlatformPieces:
 
     def test_pieces_are_1x1_plates(self):
         pieces, _ = _build_platform_pieces(*self._inputs())
-        assert all(p.part == "3024" for p in pieces)
+        assert all(p.part == _PLATFORM_TILE_PART for p in pieces)
 
     def test_tile_count_covers_extent(self):
         # extent (0,40, 0,40) → 2×2 tiles of 20 LDU each → 4 tiles
@@ -867,10 +870,62 @@ class TestBuildPlatformPieces:
 
 
 # ---------------------------------------------------------------------------
+# Step: _build_cluster_label_data
+# ---------------------------------------------------------------------------
+
+class TestBuildClusterLabelData:
+    def _inputs(self):
+        cluster_objs        = [{"_gvid": 0, "nodes": [1], "name": "cluster_A", "label": "MyCluster"}]
+        cluster_tile_extent = {"cluster_A": TileExtent(0, 60, 0, 40)}
+        cluster_depth       = {"cluster_A": 0}
+        return cluster_objs, cluster_tile_extent, cluster_depth
+
+    def test_returns_one_entry_per_cluster(self):
+        result = _build_cluster_label_data(*self._inputs())
+        assert len(result) == 1
+
+    def test_label_uses_display_name(self):
+        result = _build_cluster_label_data(*self._inputs())
+        assert result[0]["label"] == "MyCluster"
+
+    def test_label_falls_back_to_name(self):
+        cluster_objs = [{"_gvid": 0, "nodes": [1], "name": "cluster_A"}]
+        result = _build_cluster_label_data(
+            cluster_objs, {"cluster_A": TileExtent(0, 40, 0, 40)}, {"cluster_A": 0}
+        )
+        assert result[0]["label"] == "cluster_A"
+
+    def test_pos_is_3d_array(self):
+        result = _build_cluster_label_data(*self._inputs())
+        assert isinstance(result[0]["pos"], np.ndarray)
+        assert result[0]["pos"].shape == (3,)
+
+    def test_pos_x_is_center_of_extent(self):
+        result = _build_cluster_label_data(*self._inputs())
+        # TileExtent(0, 60, ...) → center X = 30
+        assert result[0]["pos"][0] == pytest.approx(30.0)
+
+    def test_pos_z_is_front_edge(self):
+        result = _build_cluster_label_data(*self._inputs())
+        # TileExtent(..., 0, 40) → front Z = z1 = 40
+        assert result[0]["pos"][2] == pytest.approx(40.0)
+
+    def test_pos_y_is_platform_surface(self):
+        result = _build_cluster_label_data(*self._inputs())
+        # depth=0 → platform_y = -(0+1)*8 = -8
+        assert result[0]["pos"][1] == pytest.approx(-_PLATE_H_LDU)
+
+    def test_cluster_missing_from_extent_skipped(self):
+        cluster_objs = [{"_gvid": 0, "nodes": [1], "name": "cluster_A", "label": "A"}]
+        result = _build_cluster_label_data(cluster_objs, {}, {"cluster_A": 0})
+        assert result == []
+
+
+# ---------------------------------------------------------------------------
 # Step: _assemble_piece_groups
 # ---------------------------------------------------------------------------
 
-def _make_piece(part: str = "3024") -> Piece:
+def _make_piece(part: str = _PLATFORM_TILE_PART) -> Piece:
     return Piece(part=part, color=1, pos=np.zeros(3), rot=np.eye(3))
 
 
@@ -896,14 +951,14 @@ class TestAssemblePieceGroups:
     def test_platform_tiles_before_node_brick_within_group(self):
         cluster_objs  = [{"_gvid": 0, "nodes": [1], "name": "cluster_A"}]
         cluster_depth = {"cluster_A": 0}
-        tile  = _make_piece("3024")
+        tile  = _make_piece(_PLATFORM_TILE_PART)
         brick = _make_piece("3003")
         groups = _assemble_piece_groups(
             cluster_objs, cluster_depth,
             {"cluster_A": [brick]}, {"cluster_A": [tile]}, []
         )
         _, grp = groups[0]
-        assert grp[0].part == "3024"
+        assert grp[0].part == _PLATFORM_TILE_PART
         assert grp[-1].part == "3003"
 
     def test_outer_cluster_before_inner(self):

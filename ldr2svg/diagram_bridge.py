@@ -53,7 +53,8 @@ _CLUSTER_PALETTE = [1, 4, 2, 25, 41, 22]
 _PLATE_H_LDU    = 8      # height of a 1×1 plate (3024, height = 1/3 brick)
 _BRICK_H_LDU    = 24     # height of a 2×2 brick (3003, height = 1 brick)
 _TILE_LDU       = 20     # one stud = one 1×1 tile width
-_NODE_TILE_PART = "3068b"  # 2×2 flat tile placed on top of each node brick (no studs)
+_NODE_TILE_PART      = "3068b"  # 2×2 flat tile placed on top of each node brick (no studs)
+_PLATFORM_TILE_PART = "3070b"  # 1×1 flat tile used for cluster platforms (no studs)
 
 
 @dataclass
@@ -383,7 +384,7 @@ def _build_platform_pieces(
         for x in range(ext.x0, ext.x1, _TILE_LDU):
             for z in range(ext.z0, ext.z1, _TILE_LDU):
                 pos = np.array([float(x + _TILE_LDU // 2), plate_y, float(z + _TILE_LDU // 2)])
-                piece = Piece(part="3024", color=color, pos=pos, rot=np.eye(3))
+                piece = Piece(part=_PLATFORM_TILE_PART, color=color, pos=pos, rot=np.eye(3))
                 pieces.append(piece)
                 cluster_platform_tiles.setdefault(name, []).append(piece)
 
@@ -414,6 +415,30 @@ def _assemble_piece_groups(
     if lone_node_bricks:
         piece_groups.append(("lone", lone_node_bricks))
     return piece_groups
+
+
+def _build_cluster_label_data(
+    cluster_objs: list[dict],
+    cluster_tile_extent: dict[str, TileExtent],
+    cluster_depth: dict[str, int],
+) -> list[dict]:
+    """Return label metadata for each cluster platform.
+
+    Each entry has ``pos`` (LDraw XYZ at the front-centre of the platform
+    surface) and ``label`` (display text).
+    """
+    result = []
+    for cl in (c for c in cluster_objs if c["name"] in cluster_tile_extent):
+        name  = cl["name"]
+        ext   = cluster_tile_extent[name]
+        depth = cluster_depth[name]
+        cx    = float(ext.x0 + ext.x1) / 2.0
+        platform_y = float(-(depth + 1) * _PLATE_H_LDU)
+        result.append({
+            "pos":   np.array([cx, platform_y, float(ext.z1)]),
+            "label": cl.get("label") or name,
+        })
+    return result
 
 
 def _build_edge_positions(
@@ -450,7 +475,7 @@ def _build_edge_positions(
 
 def build_ldr_scene(
     graph: dict,
-) -> tuple[list[Piece], list[tuple], list[dict], list[tuple[str, list[Piece]]]]:
+) -> tuple[list[Piece], list[tuple], list[dict], list[tuple[str, list[Piece]]], list[dict]]:
     """Parse graphviz JSON layout and build LDraw scene data.
 
     Parameters
@@ -464,12 +489,15 @@ def build_ldr_scene(
         All :class:`~ldr2svg.parts.Piece` objects (node bricks + platform
         tiles) ready for :func:`~ldr2svg.ldr2png_svg.build_pngs`.
     edge_positions
-        ``(from_pos, to_pos)`` pairs in LDraw coordinates at floor level
-        (Y = 0) — used to draw SVG floor arrows.
+        ``(from_pos, to_pos)`` pairs in LDraw coordinates — used to draw
+        SVG floor arrows.
     node_data
         One dict per node with keys ``pos``, ``icon_path``, ``label``, ``half_w``.
     piece_groups
         Ordered ``(group_name, pieces)`` list for SVG ``<g>`` wrapping.
+    cluster_data
+        One dict per cluster with keys ``pos`` (front-centre of platform
+        surface) and ``label`` (display text).
     """
     node_objs, cluster_objs = _parse_objects(graph)
 
@@ -499,4 +527,6 @@ def build_ldr_scene(
 
     edge_positions = _build_edge_positions(graph.get("edges", []), gvid_to_ld, gvid_to_mid_y)
 
-    return node_pieces + platform_pieces, edge_positions, node_data, piece_groups
+    cluster_data = _build_cluster_label_data(cluster_objs, cluster_tile_extent, cluster_depth)
+
+    return node_pieces + platform_pieces, edge_positions, node_data, piece_groups, cluster_data

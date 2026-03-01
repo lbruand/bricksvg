@@ -196,6 +196,36 @@ def _draw_labels(
 
 
 # ---------------------------------------------------------------------------
+# Cluster labels
+# ---------------------------------------------------------------------------
+
+def _draw_cluster_labels(
+    dwg: svgwrite.Drawing,
+    cluster_data: list[dict],
+    cx,
+    cy,
+) -> None:
+    """Draw isometric-skewed text labels at the front edge of each cluster platform."""
+    grp = dwg.g(id="cluster_labels")
+    for nd in (n for n in cluster_data if n.get("label", "")):
+        pos = nd["pos"]
+        lx, ly = _proj_canvas(pos, cx, cy)
+        text_el = dwg.text(
+            nd["label"],
+            insert=(0, 0),
+            font_size="11",
+            font_weight="bold",
+            fill="#444",
+            text_anchor="middle",
+        )
+        text_el.attribs["transform"] = (
+            f"translate({lx:.1f},{ly:.1f}) scale(1,0.5) rotate(-30)"
+        )
+        grp.add(text_el)
+    dwg.add(grp)
+
+
+# ---------------------------------------------------------------------------
 # Main compose function
 # ---------------------------------------------------------------------------
 
@@ -205,6 +235,7 @@ def compose_diagram_svg(
     arrows: list[tuple],
     node_data: list[dict],
     piece_groups: list[tuple[str, list[Piece]]] | None = None,
+    cluster_data: list[dict] | None = None,
     padding: int = 60,
 ) -> None:
     """Compose the final isometric brick SVG.
@@ -315,10 +346,14 @@ def compose_diagram_svg(
     # 4. Icons on top faces
     _draw_icons(dwg, node_data, cx, cy)
 
-    # 5. Labels
+    # 5. Node labels
     _draw_labels(dwg, node_data, cx, cy)
 
-    # 6. Arrows
+    # 6. Cluster labels
+    if cluster_data:
+        _draw_cluster_labels(dwg, cluster_data, cx, cy)
+
+    # 7. Arrows
     _draw_floor_arrows(dwg, arrows, cx, cy)
 
     dwg.save(pretty=True)
