@@ -65,7 +65,7 @@ def _make_arc_arrow(
     path = dwg.path(
         d=f"M {x0:.1f},{y0:.1f} C {x0:.1f},{y0 - lift:.1f} {x1:.1f},{y1 - lift:.1f} {x1:.1f},{y1:.1f}",
         stroke="#888",
-        stroke_width="1.5",
+        stroke_width="3",
         fill="none",
     )
     path.attribs["marker-end"] = "url(#arrow)"
