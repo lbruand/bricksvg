@@ -12,13 +12,14 @@ import svgwrite.container
 import svgwrite.image
 from PIL import Image
 
-# svgwrite has no built-in Mask element; reuse Group with the right tag name.
-class _SvgMask(svgwrite.container.Group):
-    elementname = "mask"
-
 from .parts import Piece
 from .projection import project_ldraw, PX_PER_MM
 from .grid import _grid_params, _grid_corner_sx_sy, _draw_isometric_grid
+
+
+# svgwrite has no built-in Mask element; reuse Group with the right tag name.
+class _SvgMask(svgwrite.container.Group):
+    elementname = "mask"
 
 
 def _piece_label(piece: Piece) -> str:
