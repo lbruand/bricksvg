@@ -212,10 +212,13 @@ def _draw_cluster_labels(
         lx, ly = _proj_canvas(pos, cx, cy)
         # Shift f (screen-Y translation) to vertically centre the glyphs on the
         # tile. b+d=1 so adding δ to f produces a pure +δ px screen-Y shift.
-        # Em-centre sits ≈ 0.4×fs above the baseline; after the matrix (d=0.5)
-        # that puts the visual centre 0.5×0.4×fs = 0.2×fs px above the anchor.
+        # Two contributions to the needed offset:
+        #   glyph em-centre above baseline: d×0.4×fs = 0.5×0.4×fs ≈ 0.08×fs
+        #   tile front face (26 px high) pushes the piece visual centre 13 px
+        #   below the projected top-face anchor → ~0.42×fs at fs=40
+        # Total ≈ 0.5×fs centres the text on the visible tile piece.
         _font_size = 40
-        ly += _font_size * 0.2
+        ly += _font_size * 0.5
         text_el = dwg.text(
             nd["label"],
             insert=(0, 0),
