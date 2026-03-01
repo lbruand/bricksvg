@@ -464,3 +464,23 @@ class TestComposeDiagramSvgGroups:
         _, root = self._run_grouped(tmp_path)
         grp = root.find(f".//{{{NS}}}g[@id='platform_lone']")
         assert grp is None
+
+    def test_node_group_present_for_cluster(self, tmp_path):
+        """Node bricks must be wrapped in <g id='nodes_cluster_test'>."""
+        _, root = self._run_grouped(tmp_path)
+        grp = root.find(f".//{{{NS}}}g[@id='nodes_cluster_test']")
+        assert grp is not None
+
+    def test_node_group_present_for_lone(self, tmp_path):
+        """Lone node bricks must be wrapped in <g id='nodes_lone'>."""
+        _, root = self._run_grouped(tmp_path)
+        grp = root.find(f".//{{{NS}}}g[@id='nodes_lone']")
+        assert grp is not None
+
+    def test_node_group_contains_use(self, tmp_path):
+        """Each nodes <g> must contain at least one <use> element."""
+        _, root = self._run_grouped(tmp_path)
+        for gid in ("nodes_cluster_test", "nodes_lone"):
+            grp = root.find(f".//{{{NS}}}g[@id='{gid}']")
+            assert grp is not None
+            assert len(grp.findall(f"{{{NS}}}use")) >= 1

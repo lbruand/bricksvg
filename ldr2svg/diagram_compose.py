@@ -290,15 +290,24 @@ def compose_diagram_svg(
                 ))
             dwg.add(grp)
 
-        # Pass 2: node bricks + tiles (non-3024) globally sorted back-to-front
-        # so pieces from different clusters never occlude each other incorrectly.
-        all_rows = sorted(
-            [piece_proj[id(p)] for _, group_pieces in piece_groups
-             for p in group_pieces if p.part != "3024" and id(p) in piece_proj],
-            key=lambda r: (-r[1], r[0]),
-        )
-        for _depth, _ldy, sx_px, sy_px, _ax, _ay, _iw, _ih, label in all_rows:
-            _use(sx_px, sy_px, label)
+        # Pass 2: node bricks + tiles (non-3024) per cluster in named <g> groups,
+        # sorted back-to-front within each group.
+        for group_name, group_pieces in piece_groups:
+            node_rows = sorted(
+                [piece_proj[id(p)] for p in group_pieces
+                 if p.part != "3024" and id(p) in piece_proj],
+                key=lambda r: (-r[1], r[0]),
+            )
+            if not node_rows:
+                continue
+            grp = dwg.g(id=f"nodes_{group_name}")
+            for _depth, _ldy, sx_px, sy_px, _ax, _ay, _iw, _ih, label in node_rows:
+                def_id, dax, day = defs[label]
+                grp.add(dwg.use(
+                    f"#{def_id}",
+                    insert=(f"{cx(sx_px) - dax:.1f}px", f"{cy(sy_px) - day:.1f}px"),
+                ))
+            dwg.add(grp)
     else:
         for sx_px, sy_px, _, _, _, _, label in projected:
             _use(sx_px, sy_px, label)
