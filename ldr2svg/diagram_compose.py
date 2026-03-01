@@ -345,7 +345,7 @@ def compose_diagram_svg(
             g.add(use_el)
             grp.add(g)
 
-        defs = None  # not used in masked path
+        defs: dict[str, tuple[str, float, float]] = {}  # not used in masked path
     else:
         defs = _build_defs(dwg, renders)
         piece_proj = {
