@@ -225,7 +225,8 @@ class TestImgToDataUri:
         assert uri.startswith("data:image/png;base64,")
 
     def test_decodable_back_to_image(self):
-        import base64, io
+        import base64
+        import io
         img = Image.new("RGBA", (10, 10), (128, 64, 32, 255))
         uri = _img_to_data_uri(img)
         b64 = uri[len("data:image/png;base64,"):]

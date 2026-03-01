@@ -8,7 +8,7 @@ from PIL import Image
 
 from ldr2svg.parts import parse_ldr, PART_MAP, Piece, ldraw_rgb
 from ldr2svg.ldr2png_svg import _render_one_white, build_pngs_white, _colorize, colorize_renders
-from ldr2svg.compose import _piece_label, _piece_label_no_color
+from ldr2svg.compose import _piece_label_no_color
 
 LDR_PATH = Path(__file__).parent.parent / "test.ldr"
 
@@ -149,6 +149,7 @@ class TestColorize:
         r, g, b = ldraw_rgb(color_id)
         result = _colorize(self._white_img(), color_id=color_id)
         pixel = result.getpixel((0, 0))
+        assert isinstance(pixel, tuple)
         assert pixel[0] == pytest.approx(r, abs=1)
         assert pixel[1] == pytest.approx(g, abs=1)
         assert pixel[2] == pytest.approx(b, abs=1)
@@ -156,6 +157,7 @@ class TestColorize:
     def test_black_pixels_stay_black(self):
         result = _colorize(self._black_img(), color_id=4)
         pixel = result.getpixel((0, 0))
+        assert isinstance(pixel, tuple)
         assert pixel[0] == 0
         assert pixel[1] == 0
         assert pixel[2] == 0
@@ -163,7 +165,9 @@ class TestColorize:
     def test_alpha_preserved(self):
         img = Image.new("RGBA", (10, 10), (255, 255, 255, 128))
         result = _colorize(img, color_id=4)
-        assert result.getpixel((0, 0))[3] == 128
+        pixel = result.getpixel((0, 0))
+        assert isinstance(pixel, tuple)
+        assert pixel[3] == 128
 
 
 class TestColorizeRenders:
