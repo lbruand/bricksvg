@@ -212,7 +212,7 @@ def compose_diagram_svg(
     Layer order:
     1. Background rect
     2. Isometric floor grid
-    3. Brick ``<use>`` elements (back-to-front)
+    3. Brick ``<use>`` elements (globally sorted back-to-front across all groups)
     4. Icons on top faces
     5. Isometric labels
     6. Arrows (on top of everything so they are always visible)
@@ -269,23 +269,17 @@ def compose_diagram_svg(
             insert=(f"{cx(sx_px) - dax:.1f}px", f"{cy(sy_px) - day:.1f}px"),
         ))
 
-    def _use_in(grp, sx_px: float, sy_px: float, label: str) -> None:
-        def_id, dax, day = defs[label]
-        grp.add(dwg.use(
-            f"#{def_id}",
-            insert=(f"{cx(sx_px) - dax:.1f}px", f"{cy(sy_px) - day:.1f}px"),
-        ))
-
     if piece_groups is not None:
-        for group_name, group_pieces in piece_groups:
-            grp = dwg.g(id=group_name)
-            rows = sorted(
-                [piece_proj[id(p)] for p in group_pieces if id(p) in piece_proj],
-                key=lambda r: (-r[1], r[0]),
-            )
-            for depth, ldy, sx_px, sy_px, _ax, _ay, iw, ih, label in rows:
-                _use_in(grp, sx_px, sy_px, label)
-            dwg.add(grp)
+        # Globally sort all pieces across all groups back-to-front so pieces
+        # from different groups (e.g. lone nodes vs cluster bricks) never
+        # occlude each other incorrectly.
+        all_rows = sorted(
+            [piece_proj[id(p)] for _, group_pieces in piece_groups
+             for p in group_pieces if id(p) in piece_proj],
+            key=lambda r: (-r[1], r[0]),
+        )
+        for _depth, _ldy, sx_px, sy_px, _ax, _ay, _iw, _ih, label in all_rows:
+            _use(sx_px, sy_px, label)
     else:
         for sx_px, sy_px, _, _, _, _, label in projected:
             _use(sx_px, sy_px, label)

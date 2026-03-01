@@ -412,7 +412,7 @@ class TestComposeDiagramSvg:
 
 
 # ---------------------------------------------------------------------------
-# compose_diagram_svg — piece_groups / <g> cluster grouping
+# compose_diagram_svg — piece_groups (flat globally-sorted rendering)
 # ---------------------------------------------------------------------------
 
 def _make_piece_groups(renders):
@@ -430,34 +430,13 @@ class TestComposeDiagramSvgGroups:
                             piece_groups=piece_groups)
         return output, ET.parse(output).getroot()
 
-    def test_cluster_g_present(self, tmp_path):
-        _, root = self._run_grouped(tmp_path)
-        grp = root.find(f".//{{{NS}}}g[@id='cluster_test']")
-        assert grp is not None
-
-    def test_lone_g_present(self, tmp_path):
-        _, root = self._run_grouped(tmp_path)
-        grp = root.find(f".//{{{NS}}}g[@id='lone']")
-        assert grp is not None
-
-    def test_uses_inside_cluster_g(self, tmp_path):
-        _, root = self._run_grouped(tmp_path)
-        grp = root.find(f".//{{{NS}}}g[@id='cluster_test']")
-        uses = grp.findall(f"{{{NS}}}use")
-        assert len(uses) == 1
-
-    def test_uses_inside_lone_g(self, tmp_path):
-        _, root = self._run_grouped(tmp_path)
-        grp = root.find(f".//{{{NS}}}g[@id='lone']")
-        uses = grp.findall(f"{{{NS}}}use")
-        assert len(uses) == 1
-
-    def test_total_use_count_unchanged(self, tmp_path):
+    def test_total_use_count_with_piece_groups(self, tmp_path):
+        """All pieces from piece_groups must appear as <use> elements."""
         _, root = self._run_grouped(tmp_path)
         uses = root.findall(f".//{{{NS}}}use")
         assert len(uses) == 2
 
-    def test_cluster_g_before_lone_g(self, tmp_path):
-        output, _ = self._run_grouped(tmp_path)
-        svg_text = Path(output).read_text()
-        assert svg_text.index('id="cluster_test"') < svg_text.index('id="lone"')
+    def test_piece_groups_produces_use_elements(self, tmp_path):
+        """piece_groups path emits <use> elements (not zero)."""
+        _, root = self._run_grouped(tmp_path)
+        assert len(root.findall(f".//{{{NS}}}use")) > 0
