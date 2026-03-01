@@ -177,15 +177,15 @@ def _draw_labels(
         ldx = float(pos[0])
         ldz = float(pos[2])
 
-        # Anchor: front-floor corner of the brick (at floor Y=0)
-        lx, ly = _proj_canvas(np.array([ldx, 0.0, ldz + hw]), cx, cy)
+        # Anchor: front-left floor corner of the brick; text extends leftward.
+        lx, ly = _proj_canvas(np.array([ldx - hw, 0.0, ldz + hw]), cx, cy)
 
         text_el = dwg.text(
             nd["label"],
             insert=(0, 0),
             font_size="9",
             fill="#333",
-            text_anchor="middle",
+            text_anchor="end",
         )
         text_el.attribs["transform"] = (
             f"translate({lx:.1f},{ly:.1f}) scale(1,0.5) rotate(-30)"
