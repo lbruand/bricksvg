@@ -81,9 +81,9 @@ def build_pngs(
         }
 
     return {
-        label: (*results[label], pieces_by_label[label])
+        label: (*r, pieces_by_label[label])
         for label in unique_labels
-        if results.get(label) is not None
+        if (r := results.get(label)) is not None
     }
 
 
