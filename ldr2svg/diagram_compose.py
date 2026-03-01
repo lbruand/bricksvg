@@ -41,61 +41,60 @@ def _arrow_polygon_3d(
     half_width: float = 4.0,
     head_length: float = 18.0,
     head_half_width: float = 10.0,
-    bend: float = 0.25,
+    lift_factor: float = 0.4,
     n_body: int = 16,
 ) -> list[np.ndarray]:
-    """Return 3D polygon vertices for a bent arrow lying on the Y=from_pos[1] plane.
+    """Return 3D polygon vertices for an arrow that arches upward (LDraw −Y).
 
-    The arrow is a filled ribbon that follows a quadratic Bézier in the XZ
-    plane, with a triangular arrowhead at *to_pos*.  All vertices share the
-    same Y coordinate so the polygon lies flat on the isometric floor.
+    The centre-line follows a quadratic Bézier whose control point is lifted
+    straight up (negative LDraw Y) at the XZ midpoint.  The ribbon width is
+    always horizontal (XZ-perpendicular to the arrow direction) so the band
+    looks like a curved strip arching over the scene.  The arrowhead is a
+    flat triangle at the destination Y level.
     """
-    y  = float(from_pos[1])
+    ay = float(from_pos[1])
+    by = float(to_pos[1])
     ax, az = float(from_pos[0]), float(from_pos[2])
     bx, bz = float(to_pos[0]),   float(to_pos[2])
+
     dx, dz = bx - ax, bz - az
-    dist = math.hypot(dx, dz)
-    if dist < 1e-6:
+    dist_xz = math.hypot(dx, dz)
+    if dist_xz < 1e-6:
         return []
 
-    ux, uz = dx / dist, dz / dist    # unit along arrow direction
-    px, pz = -uz, ux                 # unit perpendicular (left of travel)
+    ux, uz = dx / dist_xz, dz / dist_xz   # unit XZ direction
+    px, pz = -uz, ux                       # horizontal perpendicular (constant)
 
-    # Quadratic Bézier control point offset perpendicular by `bend * dist`
-    qcx = (ax + bx) / 2 + px * dist * bend
-    qcz = (az + bz) / 2 + pz * dist * bend
+    # Control point: XZ midpoint, lifted upward by lift_factor * dist_xz
+    lift = max(30.0, lift_factor * dist_xz)
+    qcx = (ax + bx) / 2
+    qcy = ay - lift                        # −Y = upward in LDraw
+    qcz = (az + bz) / 2
 
-    def _bezier(t: float) -> tuple[float, float]:
+    def _bezier3d(t: float) -> tuple[float, float, float]:
         s = 1 - t
-        return s*s*ax + 2*s*t*qcx + t*t*bx, s*s*az + 2*s*t*qcz + t*t*bz
+        return (
+            s*s*ax + 2*s*t*qcx + t*t*bx,
+            s*s*ay + 2*s*t*qcy + t*t*by,
+            s*s*az + 2*s*t*qcz + t*t*bz,
+        )
 
-    def _tangent(t: float) -> tuple[float, float]:
-        s = 1 - t
-        tx = 2*s*(qcx - ax) + 2*t*(bx - qcx)
-        tz = 2*s*(qcz - az) + 2*t*(bz - qcz)
-        tlen = math.hypot(tx, tz)
-        return (tx / tlen, tz / tlen) if tlen > 1e-9 else (ux, uz)
-
-    # t at which the body ribbon ends (arrowhead base)
-    t_end = max(0.0, 1.0 - head_length / dist) if dist > head_length else 0.0
+    # t at which the ribbon body ends and the arrowhead begins
+    t_end = max(0.0, 1.0 - head_length / dist_xz) if dist_xz > head_length else 0.0
 
     left_pts:  list[np.ndarray] = []
     right_pts: list[np.ndarray] = []
     for i in range(n_body + 1):
         t = i / n_body * t_end
-        qx, qz = _bezier(t)
-        tx, tz = _tangent(t)
-        lpx, lpz = -tz, tx            # left perpendicular at this point
-        left_pts.append( np.array([qx + lpx * half_width,  y, qz + lpz * half_width]))
-        right_pts.append(np.array([qx - lpx * half_width,  y, qz - lpz * half_width]))
+        qx, qy, qz = _bezier3d(t)
+        left_pts.append( np.array([qx + px * half_width,  qy, qz + pz * half_width]))
+        right_pts.append(np.array([qx - px * half_width,  qy, qz - pz * half_width]))
 
-    # Arrowhead base
-    hbx, hbz = _bezier(t_end)
-    htx, htz = _tangent(t_end)
-    hpx, hpz = -htz, htx
-    head_left  = np.array([hbx + hpx * head_half_width, y, hbz + hpz * head_half_width])
-    head_right = np.array([hbx - hpx * head_half_width, y, hbz - hpz * head_half_width])
-    tip        = np.array([bx, y, bz])
+    # Arrowhead: flat triangle at the destination Y level
+    hbx, _, hbz = _bezier3d(t_end)
+    head_left  = np.array([hbx + px * head_half_width, by, hbz + pz * head_half_width])
+    head_right = np.array([hbx - px * head_half_width, by, hbz - pz * head_half_width])
+    tip        = np.array([bx, by, bz])
 
     # Full outline: left body → head_left → tip → head_right → right body (reversed)
     return left_pts + [head_left, tip, head_right] + list(reversed(right_pts))

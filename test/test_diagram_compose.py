@@ -130,10 +130,13 @@ class TestArrowPolygon3d:
         result = _arrow_polygon_3d(np.array([0.0, 0.0, 0.0]), np.array([0.0, 0.0, 0.0]))
         assert result == []
 
-    def test_all_vertices_share_y(self):
+    def test_body_arches_above_endpoints(self):
+        """The ribbon body must lift above the endpoint Y level (LDraw −Y = upward)."""
         y = -32.0
-        for v in self._arrow(y=y):
-            assert v[1] == pytest.approx(y)
+        verts = self._arrow(y=y)
+        # Midpoint vertex should be higher (more negative Y) than the endpoints
+        mid = verts[len(verts) // 4]   # roughly mid of left edge
+        assert mid[1] < y
 
     def test_tip_is_to_pos(self):
         verts = self._arrow(x1=80.0, z1=0.0, y=-32.0)
