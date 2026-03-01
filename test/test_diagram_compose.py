@@ -11,7 +11,8 @@ from PIL import Image
 from ldr2svg.compose import _piece_label
 from ldr2svg.diagram_compose import (
     _proj_canvas,
-    _add_arrow_defs,
+    _arrow_polygon_3d,
+    _make_iso_arrow,
     _draw_floor_arrows,
     _draw_icons,
     _draw_labels,
@@ -112,44 +113,38 @@ class TestProjCanvas:
 
 
 # ---------------------------------------------------------------------------
-# _add_arrow_defs
+# _arrow_polygon_3d
 # ---------------------------------------------------------------------------
 
-class TestAddArrowDefs:
-    def _get_root(self, tmp_path):
-        dwg = _make_dwg(tmp_path)
-        _add_arrow_defs(dwg)
-        dwg.save()
-        return _parse_svg(tmp_path / "t.svg")
+class TestArrowPolygon3d:
+    def _arrow(self, x0=0.0, z0=0.0, x1=80.0, z1=0.0, y=-32.0):
+        return _arrow_polygon_3d(
+            np.array([x0, y, z0]),
+            np.array([x1, y, z1]),
+        )
 
-    def test_marker_added_to_defs(self, tmp_path):
-        root = self._get_root(tmp_path)
-        defs = root.find(f"{{{NS}}}defs")
-        markers = defs.findall(f"{{{NS}}}marker")
-        assert len(markers) == 1
+    def test_returns_nonempty_list(self):
+        assert len(self._arrow()) > 0
 
-    def test_marker_id_is_arrow(self, tmp_path):
-        root = self._get_root(tmp_path)
-        marker = root.find(f".//{{{NS}}}marker")
-        assert marker.attrib["id"] == "arrow"
+    def test_zero_length_returns_empty(self):
+        result = _arrow_polygon_3d(np.array([0.0, 0.0, 0.0]), np.array([0.0, 0.0, 0.0]))
+        assert result == []
 
-    def test_marker_orient_auto(self, tmp_path):
-        root = self._get_root(tmp_path)
-        marker = root.find(f".//{{{NS}}}marker")
-        assert marker.attrib.get("orient") == "auto"
+    def test_all_vertices_share_y(self):
+        y = -32.0
+        for v in self._arrow(y=y):
+            assert v[1] == pytest.approx(y)
 
-    def test_marker_has_polygon(self, tmp_path):
-        root = self._get_root(tmp_path)
-        polygon = root.find(f".//{{{NS}}}polygon")
-        assert polygon is not None
+    def test_tip_is_to_pos(self):
+        verts = self._arrow(x1=80.0, z1=0.0, y=-32.0)
+        xs = [v[0] for v in verts]
+        zs = [v[2] for v in verts]
+        # tip (to_pos) must be one of the vertices
+        assert any(abs(x - 80.0) < 1e-6 and abs(z - 0.0) < 1e-6 for x, z in zip(xs, zs))
 
-    def test_polygon_has_three_points(self, tmp_path):
-        root = self._get_root(tmp_path)
-        polygon = root.find(f".//{{{NS}}}polygon")
-        # SVG polygon "points" attribute: 3 pairs = 6 numbers
-        points_str = polygon.attrib.get("points", "")
-        coords = points_str.replace(",", " ").split()
-        assert len(coords) == 6
+    def test_polygon_has_enough_vertices(self):
+        # n_body=16 → 17 left + 17 right + 3 head = 37 vertices minimum
+        assert len(self._arrow()) >= 37
 
 
 # ---------------------------------------------------------------------------
@@ -159,22 +154,21 @@ class TestAddArrowDefs:
 class TestDrawFloorArrows:
     def _run(self, tmp_path, arrows, name="arrows.svg"):
         dwg = _make_dwg(tmp_path, name)
-        _add_arrow_defs(dwg)
         _draw_floor_arrows(dwg, arrows, _identity, _identity)
         dwg.save()
         return _parse_svg(tmp_path / name)
 
-    def _arrow_paths(self, root):
-        return root.findall(f".//{{{NS}}}path[@stroke='#888']")
+    def _arrow_polygons(self, root):
+        return root.findall(f".//{{{NS}}}polygon[@fill='#888']")
 
-    def test_empty_input_produces_no_paths(self, tmp_path):
+    def test_empty_input_produces_no_polygons(self, tmp_path):
         root = self._run(tmp_path, [])
-        assert len(self._arrow_paths(root)) == 0
+        assert len(self._arrow_polygons(root)) == 0
 
-    def test_one_arrow_produces_one_path(self, tmp_path):
+    def test_one_arrow_produces_one_polygon(self, tmp_path):
         arrows = [(_floor_pos(0, 0), _floor_pos(80, 0))]
         root = self._run(tmp_path, arrows)
-        assert len(self._arrow_paths(root)) == 1
+        assert len(self._arrow_polygons(root)) == 1
 
     def test_arrow_count_matches_input(self, tmp_path):
         arrows = [
@@ -183,19 +177,18 @@ class TestDrawFloorArrows:
             (_floor_pos(160, 0), _floor_pos(240, 0)),
         ]
         root = self._run(tmp_path, arrows)
-        assert len(self._arrow_paths(root)) == 3
+        assert len(self._arrow_polygons(root)) == 3
 
-    def test_paths_have_marker_end_attribute(self, tmp_path):
+    def test_polygons_have_fill(self, tmp_path):
         arrows = [(_floor_pos(0, 0), _floor_pos(80, 0))]
         root = self._run(tmp_path, arrows)
-        path = self._arrow_paths(root)[0]
-        assert "marker-end" in path.attrib
-        assert "arrow" in path.attrib["marker-end"]
+        poly = self._arrow_polygons(root)[0]
+        assert poly.attrib.get("fill") == "#888"
 
     def test_coincident_points_skipped(self, tmp_path):
         arrows = [(_floor_pos(0, 0), _floor_pos(0, 0))]
         root = self._run(tmp_path, arrows, name="skip.svg")
-        assert len(self._arrow_paths(root)) == 0
+        assert len(self._arrow_polygons(root)) == 0
 
     def test_arrows_group_present(self, tmp_path):
         root = self._run(tmp_path, [])
@@ -439,8 +432,8 @@ class TestComposeDiagramSvg:
     def test_arrow_count_in_svg(self, tmp_path):
         arrows = [(_floor_pos(0), _floor_pos(80)), (_floor_pos(80), _floor_pos(160))]
         _, root = self._run(tmp_path, arrows=arrows, name="arrows.svg")
-        paths = root.findall(f".//{{{NS}}}path[@stroke='#888']")
-        assert len(paths) == 2
+        polys = root.findall(f".//{{{NS}}}polygon[@fill='#888']")
+        assert len(polys) == 2
 
     def test_label_text_content(self, tmp_path):
         _, root = self._run(tmp_path, node_data=_minimal_node_data(label="my-node"),

@@ -4,7 +4,6 @@ import math
 
 import numpy as np
 import svgwrite
-import svgwrite.container
 from PIL import Image
 
 from .compose import (
@@ -33,43 +32,91 @@ def _proj_canvas(
 
 
 # ---------------------------------------------------------------------------
-# Arrow defs + drawing
+# Isometric polygon arrows
 # ---------------------------------------------------------------------------
 
-def _add_arrow_defs(dwg: svgwrite.Drawing) -> None:
-    """Add a filled arrowhead marker to <defs>."""
-    marker = svgwrite.container.Marker(
-        id="arrow",
-        insert=(5, 3),
-        size=(6, 6),
-        orient="auto",
-    )
-    marker.add(dwg.polygon(points=[(0, 0), (6, 3), (0, 6)], fill="#666"))
-    dwg.defs.add(marker)
+def _arrow_polygon_3d(
+    from_pos: np.ndarray,
+    to_pos: np.ndarray,
+    half_width: float = 4.0,
+    head_length: float = 18.0,
+    head_half_width: float = 10.0,
+    bend: float = 0.25,
+    n_body: int = 16,
+) -> list[np.ndarray]:
+    """Return 3D polygon vertices for a bent arrow lying on the Y=from_pos[1] plane.
+
+    The arrow is a filled ribbon that follows a quadratic Bézier in the XZ
+    plane, with a triangular arrowhead at *to_pos*.  All vertices share the
+    same Y coordinate so the polygon lies flat on the isometric floor.
+    """
+    y  = float(from_pos[1])
+    ax, az = float(from_pos[0]), float(from_pos[2])
+    bx, bz = float(to_pos[0]),   float(to_pos[2])
+    dx, dz = bx - ax, bz - az
+    dist = math.hypot(dx, dz)
+    if dist < 1e-6:
+        return []
+
+    ux, uz = dx / dist, dz / dist    # unit along arrow direction
+    px, pz = -uz, ux                 # unit perpendicular (left of travel)
+
+    # Quadratic Bézier control point offset perpendicular by `bend * dist`
+    qcx = (ax + bx) / 2 + px * dist * bend
+    qcz = (az + bz) / 2 + pz * dist * bend
+
+    def _bezier(t: float) -> tuple[float, float]:
+        s = 1 - t
+        return s*s*ax + 2*s*t*qcx + t*t*bx, s*s*az + 2*s*t*qcz + t*t*bz
+
+    def _tangent(t: float) -> tuple[float, float]:
+        s = 1 - t
+        tx = 2*s*(qcx - ax) + 2*t*(bx - qcx)
+        tz = 2*s*(qcz - az) + 2*t*(bz - qcz)
+        tlen = math.hypot(tx, tz)
+        return (tx / tlen, tz / tlen) if tlen > 1e-9 else (ux, uz)
+
+    # t at which the body ribbon ends (arrowhead base)
+    t_end = max(0.0, 1.0 - head_length / dist) if dist > head_length else 0.0
+
+    left_pts:  list[np.ndarray] = []
+    right_pts: list[np.ndarray] = []
+    for i in range(n_body + 1):
+        t = i / n_body * t_end
+        qx, qz = _bezier(t)
+        tx, tz = _tangent(t)
+        lpx, lpz = -tz, tx            # left perpendicular at this point
+        left_pts.append( np.array([qx + lpx * half_width,  y, qz + lpz * half_width]))
+        right_pts.append(np.array([qx - lpx * half_width,  y, qz - lpz * half_width]))
+
+    # Arrowhead base
+    hbx, hbz = _bezier(t_end)
+    htx, htz = _tangent(t_end)
+    hpx, hpz = -htz, htx
+    head_left  = np.array([hbx + hpx * head_half_width, y, hbz + hpz * head_half_width])
+    head_right = np.array([hbx - hpx * head_half_width, y, hbz - hpz * head_half_width])
+    tip        = np.array([bx, y, bz])
+
+    # Full outline: left body → head_left → tip → head_right → right body (reversed)
+    return left_pts + [head_left, tip, head_right] + list(reversed(right_pts))
 
 
-def _make_arc_arrow(
+def _make_iso_arrow(
     dwg: svgwrite.Drawing,
     from_pos: np.ndarray,
     to_pos: np.ndarray,
     cx,
     cy,
 ):
-    """Return a cubic-Bezier arc SVG path for one arrow, or None if endpoints coincide."""
-    x0, y0 = _proj_canvas(from_pos, cx, cy)
-    x1, y1 = _proj_canvas(to_pos,   cx, cy)
-    dist = math.hypot(x1 - x0, y1 - y0)
-    if dist < 1e-6:
+    """Return a projected isometric polygon for one arrow, or None if zero-length."""
+    verts = _arrow_polygon_3d(from_pos, to_pos)
+    if not verts:
         return None
-    lift = max(40.0, 0.35 * dist)
-    path = dwg.path(
-        d=f"M {x0:.1f},{y0:.1f} C {x0:.1f},{y0 - lift:.1f} {x1:.1f},{y1 - lift:.1f} {x1:.1f},{y1:.1f}",
-        stroke="#888",
-        stroke_width="3",
-        fill="none",
+    pts = [_proj_canvas(v, cx, cy) for v in verts]
+    return dwg.polygon(
+        points=[(f"{x:.1f}", f"{y:.1f}") for x, y in pts],
+        fill="#888",
     )
-    path.attribs["marker-end"] = "url(#arrow)"
-    return path
 
 
 def _draw_floor_arrows(
@@ -78,11 +125,10 @@ def _draw_floor_arrows(
     cx,
     cy,
 ) -> None:
-    """Draw directed arc arrows connecting nodes."""
+    """Draw isometric polygon arrows lying on the horizontal plane."""
     grp = dwg.g(id="arrows")
-    paths = filter(None, (_make_arc_arrow(dwg, fp, tp, cx, cy) for fp, tp in arrows))
-    for path in paths:
-        grp.add(path)
+    for poly in filter(None, (_make_iso_arrow(dwg, fp, tp, cx, cy) for fp, tp in arrows)):
+        grp.add(poly)
     dwg.add(grp)
 
 
@@ -314,9 +360,6 @@ def compose_diagram_svg(
 
     # 2. Grid
     _draw_grid(dwg, grid, cx, cy)
-
-    # Arrow marker in <defs>
-    _add_arrow_defs(dwg)
 
     # 3. Brick images in defs + placed instances (back-to-front, grouped by cluster)
     if masked:
