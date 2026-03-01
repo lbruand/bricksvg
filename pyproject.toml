@@ -1,10 +1,10 @@
 [project]
 name = "ldr2svg"
 version = "0.1.0"
-description = "Render LDraw/.ldr scenes and diagrams-library scripts to isometric LEGO SVGs"
+description = "Render LDraw/.ldr scenes and diagrams-library scripts to isometric brick SVGs"
 requires-python = ">=3.10"
 # System dependencies (not installable via pip):
-#   openscad  — renders LEGO piece images (required for build_pngs / slow tests)
+#   openscad  — renders brick piece images (required for build_pngs / slow tests)
 #   graphviz  — lays out diagrams-library graphs via the 'dot' engine
 #   xvfb      — virtual display for headless OpenSCAD rendering (Linux only)
 dependencies = [

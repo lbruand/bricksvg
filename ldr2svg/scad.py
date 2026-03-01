@@ -11,7 +11,7 @@ from PIL import Image
 from .parts import PartDef
 from .projection import CAMERA_RX, CAMERA_RZ, CAMERA_D, IMG_PX, _T
 
-LEGOLIB  = Path(__file__).parent / "LEGO.scad"
+BRICKLIB = Path(__file__).parent / "brick.scad"
 CROP_PAD = 6   # extra transparent pixels around each cropped piece
 
 # ---------------------------------------------------------------------------
@@ -35,7 +35,7 @@ def make_scad(part: PartDef, r: tuple[int, int, int], rot_ld: np.ndarray) -> str
     mat_str = (f"[{fmt_row(R_os[0])},{fmt_row(R_os[1])},"
                f"{fmt_row(R_os[2])},[0,0,0,1]]")
     return (
-        f'use <{LEGOLIB}>\n'
+        f'use <{BRICKLIB}>\n'
         f'$fs = 1.0; $fa = 8;\n'
         f'color({r_str})\n'
         f'multmatrix({mat_str})\n'

@@ -26,7 +26,7 @@ def ldraw_rgb(color_id: int) -> tuple[int, int, int]:
     return LDRAW_COLORS.get(color_id, (136, 136, 136))
 
 # ---------------------------------------------------------------------------
-# LDraw part → LEGO.scad block() mapping
+# LDraw part → brick.scad block() mapping
 # ---------------------------------------------------------------------------
 @dataclass
 class PartDef:

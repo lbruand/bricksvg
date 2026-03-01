@@ -20,7 +20,7 @@ class TestMakeScad:
     def test_returns_string(self):
         assert isinstance(make_scad(SAMPLE_PART, (255, 0, 0), np.eye(3)), str)
 
-    def test_includes_legolib(self):
+    def test_includes_bricklib(self):
         assert "use <" in make_scad(SAMPLE_PART, (255, 0, 0), np.eye(3))
 
     def test_contains_block_call(self):

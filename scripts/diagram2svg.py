@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""diagram2svg.py — Render a diagrams-library script as an isometric LEGO SVG.
+"""diagram2svg.py — Render a diagrams-library script as an isometric brick SVG.
 
 Usage
 -----
@@ -21,10 +21,10 @@ from ldr2svg.ldr2png_svg import build_pngs
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Render a diagrams-library Python script as an isometric LEGO SVG."
+        description="Render a diagrams-library Python script as an isometric brick SVG."
     )
     parser.add_argument("input",  help="Input diagram.py script path")
-    parser.add_argument("-o", "--output", help="Output SVG path (default: <input>_lego.svg)")
+    parser.add_argument("-o", "--output", help="Output SVG path (default: <input>_bricks.svg)")
     parser.add_argument(
         "--keep-pngs", action="store_true",
         help="Keep per-piece PNG files in the temp directory",
@@ -33,7 +33,7 @@ def main() -> None:
 
     input_path  = Path(args.input).resolve()
     output_path = (args.output
-                   or str(input_path.with_name(input_path.stem + "_lego.svg")))
+                   or str(input_path.with_name(input_path.stem + "_bricks.svg")))
 
     print(f"Extracting graph from {input_path} …")
     graph = extract_graph(str(input_path))

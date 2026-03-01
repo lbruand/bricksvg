@@ -2,14 +2,14 @@
 
 ## What this project does
 
-Two rendering pipelines, both producing isometric LEGO SVGs:
+Two rendering pipelines, both producing isometric brick SVGs:
 
 1. **LDR → SVG** (`ldr2svg scene.ldr`): parse a LeoCAD/LDraw `.ldr` file, render each
-   piece to a PNG via OpenSCAD + LEGO.scad, compose into a single SVG.
+   piece to a PNG via OpenSCAD + brick.scad, compose into a single SVG.
 
 2. **diagrams → SVG** (`scripts/diagram2svg.py diagram.py`): run a
    [diagrams-library](https://diagrams.mingrammer.com/) Python script, capture the
-   graphviz layout, map nodes → LEGO bricks and clusters → platform tiles, render with
+   graphviz layout, map nodes → bricks and clusters → platform tiles, render with
    the same OpenSCAD pipeline, compose with floor arrows, icons, and labels.
 
 ---
@@ -21,7 +21,7 @@ Two rendering pipelines, both producing isometric LEGO SVGs:
 - Units: LDU (1 LDU = 0.4 mm; 1 stud = 8 mm = 20 LDU, 1 brick height = 24 LDU, 1 plate = 8 LDU)
 - Floor is at Y = 0; pieces above floor have **negative Y**
 
-### OpenSCAD (`LEGO.scad`)
+### OpenSCAD (`brick.scad`)
 - X right, Y forward, Z **up**
 - Units: mm
 - Transform `_T` in `projection.py` maps LDraw → OpenSCAD: `os = _T @ ld * 0.4`

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ldr2png_svg.py - Render each LDraw piece with LEGO.scad/OpenSCAD, then compose into SVG."""
+"""ldr2png_svg.py - Render each LDraw piece with OpenSCAD, then compose into SVG."""
 
 import sys
 import argparse
@@ -74,16 +74,16 @@ def build_pngs(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Render each LDraw piece with LEGO.scad, compose into SVG."
+        description="Render each LDraw piece with OpenSCAD, compose into SVG."
     )
     parser.add_argument("input", help="Input .ldr file")
-    parser.add_argument("-o", "--output", help="Output SVG (default: <input>_lego.svg)")
+    parser.add_argument("-o", "--output", help="Output SVG (default: <input>_bricks.svg)")
     parser.add_argument("--keep-pngs", action="store_true",
                         help="Keep per-piece PNGs in a tmp directory")
     args = parser.parse_args()
 
     input_path  = Path(args.input)
-    output_path = args.output or str(input_path.with_name(input_path.stem + "_lego.svg"))
+    output_path = args.output or str(input_path.with_name(input_path.stem + "_bricks.svg"))
 
     pieces = parse_ldr(input_path)
     print(f"Found {len(pieces)} pieces in {input_path}")

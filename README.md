@@ -1,13 +1,13 @@
 # ldr2svg
 
-Render LDraw/LeoCAD (`.ldr`) scenes to clean isometric SVG LEGO illustrations.
+Render LDraw/LeoCAD (`.ldr`) scenes to clean isometric SVG brick illustrations.
 
 [![CI](https://github.com/lbruand/bricksvg/actions/workflows/ci.yml/badge.svg)](https://github.com/lbruand/bricksvg/actions/workflows/ci.yml)
 [![Ruff](https://img.shields.io/badge/lint-ruff-261230)](https://github.com/astral-sh/ruff)
 [![ty](https://img.shields.io/badge/type--check-ty-261230)](https://github.com/astral-sh/ty)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 
-![Example output](docs/img/test_lego.svg)
+![Example output](docs/img/test_bricks.svg)
 
 ## Usage
 
@@ -23,7 +23,7 @@ Outputs `scene.svg` alongside the input file.
 
 | Tool | Purpose | Install |
 |------|---------|---------|
-| [OpenSCAD](https://openscad.org/) | Render LEGO piece images | `sudo apt install openscad` |
+| [OpenSCAD](https://openscad.org/) | Render brick piece images | `sudo apt install openscad` |
 | [Graphviz](https://graphviz.org/) | Lay out diagrams-library graphs (`dot`) | `sudo apt install graphviz` |
 | [Xvfb](https://www.x.org/releases/X11R7.6/doc/man/man1/Xvfb.1.xhtml) | Virtual display for headless OpenSCAD | `sudo apt install xvfb` |
 

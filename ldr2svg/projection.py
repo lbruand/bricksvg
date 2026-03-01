@@ -8,7 +8,7 @@ import numpy as np
 # Coordinate transform: LDraw ↔ OpenSCAD
 # ---------------------------------------------------------------------------
 # LDraw:  X right, Y down, Z toward viewer  (units: LDU)
-# LEGO.scad/OpenSCAD: X right, Y forward, Z up  (units: mm)
+# OpenSCAD (brick.scad): X right, Y forward, Z up  (units: mm)
 # Mapping: os_X = ld_X * 0.4,  os_Y = -ld_Z * 0.4,  os_Z = -ld_Y * 0.4
 _T = np.array([[1, 0, 0],   # os_X  = ld_X
                [0, 0,-1],   # os_Y  = -ld_Z

@@ -21,7 +21,7 @@ from PIL import Image, ImageDraw
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from ldr2svg.parts import parse_ldr, PART_MAP, ldraw_rgb
 from ldr2svg.projection import _T, LDU_TO_MM, PX_PER_MM, CAMERA_RX, CAMERA_RZ, CAMERA_D, IMG_PX, project_ldraw, ldraw_to_os, _cam_matrix
-from ldr2svg.scad import LEGOLIB
+from ldr2svg.scad import BRICKLIB
 
 # ---------------------------------------------------------------------------
 # Fast unit tests (no OpenSCAD required)
@@ -110,7 +110,7 @@ Y_TOLERANCE = 15.0   # px — includes ~8.8 px constant vertical offset
 def build_reference_scad(pieces: list) -> str:
     """Return a SCAD string that places every known piece at its world position
     plus a small coloured sphere at each piece's LDraw origin."""
-    lines = [f"use <{LEGOLIB}>", "$fs = 1.0; $fa = 8;", ""]
+    lines = [f"use <{BRICKLIB}>", "$fs = 1.0; $fa = 8;", ""]
 
     for i, piece in enumerate(pieces):
         part = PART_MAP.get(piece.part)

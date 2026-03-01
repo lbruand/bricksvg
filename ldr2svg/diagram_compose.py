@@ -207,7 +207,7 @@ def compose_diagram_svg(
     piece_groups: list[tuple[str, list[Piece]]] | None = None,
     padding: int = 60,
 ) -> None:
-    """Compose the final LEGO diagram SVG.
+    """Compose the final isometric brick SVG.
 
     Layer order:
     1. Background rect

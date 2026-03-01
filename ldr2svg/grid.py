@@ -8,7 +8,7 @@ import svgwrite
 from .parts import PART_MAP
 from .projection import project_ldraw, PX_PER_MM, LDU_TO_MM
 
-GRID_STEP   = 20      # LDU = 1 LEGO stud = 8 mm
+GRID_STEP   = 20      # LDU = 1 stud = 8 mm
 GRID_MARGIN = 2       # extra grid cells around scene bounding box
 GRID_COLOR  = "#c0b8b0"
 GRID_WIDTH  = "0.5"
