@@ -14,6 +14,7 @@ from ldr2svg.diagram_bridge import (
     _PLATE_H_LDU,
     _BRICK_H_LDU,
     _TILE_LDU,
+    _NODE_TILE_PART,
     _parse_objects,
     _compute_cluster_metadata,
     _layout_positions,
@@ -290,17 +291,17 @@ class TestBuildLdrSceneCluster:
 
     def test_in_cluster_node_elevated(self):
         inside_nd = next(nd for nd in self.node_data if nd["label"] == "inside")
-        inside_brick = next(p for p in self.bricks if np.allclose(p.pos, inside_nd["pos"]))
+        inside_brick = next(p for p in self.bricks if np.isclose(p.pos[0], inside_nd["pos"][0]) and np.isclose(p.pos[2], inside_nd["pos"][2]))
         assert inside_brick.pos[1] == pytest.approx(-(_PLATE_H_LDU + _BRICK_H_LDU))
 
     def test_lone_node_at_floor_level(self):
         outside_nd = next(nd for nd in self.node_data if nd["label"] == "outside")
-        outside_brick = next(p for p in self.bricks if np.allclose(p.pos, outside_nd["pos"]))
+        outside_brick = next(p for p in self.bricks if np.isclose(p.pos[0], outside_nd["pos"][0]) and np.isclose(p.pos[2], outside_nd["pos"][2]))
         assert outside_brick.pos[1] == pytest.approx(-_BRICK_H_LDU)
 
     def test_in_cluster_node_uses_cluster_color(self):
         inside_nd = next(nd for nd in self.node_data if nd["label"] == "inside")
-        inside_brick = next(p for p in self.bricks if np.allclose(p.pos, inside_nd["pos"]))
+        inside_brick = next(p for p in self.bricks if np.isclose(p.pos[0], inside_nd["pos"][0]) and np.isclose(p.pos[2], inside_nd["pos"][2]))
         # cluster_A is first unique cluster → palette index 0 → color 1 (blue)
         assert inside_brick.color == 1
 
@@ -320,7 +321,7 @@ class TestBuildLdrSceneNestedCluster:
 
     def test_deep_node_uses_innermost_cluster_color(self):
         deep_nd = next(nd for nd in self.node_data if nd["label"] == "deep")
-        deep_brick = next(p for p in self.bricks if np.allclose(p.pos, deep_nd["pos"]))
+        deep_brick = next(p for p in self.bricks if np.isclose(p.pos[0], deep_nd["pos"][0]) and np.isclose(p.pos[2], deep_nd["pos"][2]))
         # cluster_B (size=1) wins over cluster_A (size=2)
         # cluster_B is the first unique innermost cluster → palette[0] = 1 (blue)
         assert deep_brick.color == 1
@@ -329,7 +330,7 @@ class TestBuildLdrSceneNestedCluster:
         # cluster_B (depth=1) sits inside cluster_A (depth=0).
         # Node brick Y = -(depth+1)*PLATE_H - BRICK_H = -(2*8 + 24) = -40
         deep_nd = next(nd for nd in self.node_data if nd["label"] == "deep")
-        deep_brick = next(p for p in self.bricks if np.allclose(p.pos, deep_nd["pos"]))
+        deep_brick = next(p for p in self.bricks if np.isclose(p.pos[0], deep_nd["pos"][0]) and np.isclose(p.pos[2], deep_nd["pos"][2]))
         assert deep_brick.pos[1] == pytest.approx(-(2 * _PLATE_H_LDU + _BRICK_H_LDU))
 
 
@@ -371,7 +372,10 @@ class TestLoneNodeDisplacement:
 
     def test_lone_node_brick_exists(self):
         lone_nd = next(nd for nd in self.node_data if nd["label"] == "lone")
-        match = [p for p in self.bricks if np.allclose(p.pos, lone_nd["pos"])]
+        # node_data pos is the tile top face; match brick by XZ only
+        match = [p for p in self.bricks
+                 if np.isclose(p.pos[0], lone_nd["pos"][0])
+                 and np.isclose(p.pos[2], lone_nd["pos"][2])]
         assert len(match) == 1
 
 
@@ -467,10 +471,11 @@ class TestPieceGroups:
         names = [name for name, _ in piece_groups]
         assert "lone" in names
 
-    def test_lone_group_contains_both_bricks(self):
+    def test_lone_group_contains_brick_and_tile_per_node(self):
         _, _, _, piece_groups = build_ldr_scene(_lone_graph())
         lone = next(grp for name, grp in piece_groups if name == "lone")
-        assert len(lone) == 2
+        # 2 nodes × (1 brick + 1 tile) = 4 pieces
+        assert len(lone) == 4
 
     def test_cluster_graph_has_cluster_group(self):
         _, _, _, piece_groups = build_ldr_scene(_cluster_graph())
@@ -483,11 +488,11 @@ class TestPieceGroups:
         tiles = [p for p in cluster_grp if p.part == "3024"]
         assert len(tiles) > 0
 
-    def test_cluster_group_contains_node_brick(self):
+    def test_cluster_group_contains_node_brick_and_tile(self):
         _, _, _, piece_groups = build_ldr_scene(_cluster_graph())
         cluster_grp = next(grp for name, grp in piece_groups if name == "cluster_A")
-        bricks = [p for p in cluster_grp if p.part == "3003"]
-        assert len(bricks) == 1
+        assert sum(1 for p in cluster_grp if p.part == "3003") == 1
+        assert sum(1 for p in cluster_grp if p.part == _NODE_TILE_PART) == 1
 
     def test_cluster_group_before_lone_group(self):
         _, _, _, piece_groups = build_ldr_scene(_cluster_graph())
@@ -764,35 +769,41 @@ class TestBuildNodePieces:
         cluster_depth = {"cluster_A": 0}
         return node_objs, gvid_to_ld, node_cluster, cluster_color, cluster_depth
 
-    def test_pieces_count_equals_nodes(self):
+    def test_pieces_count_equals_two_per_node(self):
+        # Each node produces a 3003 brick + a 3068b tile = 2 per node
         pieces, _, _, _, _ = _build_node_pieces(*self._inputs())
-        assert len(pieces) == 2
+        assert len(pieces) == 4
 
     def test_node_data_count_equals_nodes(self):
         _, node_data, _, _, _ = _build_node_pieces(*self._inputs())
         assert len(node_data) == 2
 
-    def test_all_pieces_are_bricks(self):
+    def test_each_node_has_brick_and_tile(self):
         pieces, _, _, _, _ = _build_node_pieces(*self._inputs())
-        assert all(p.part == "3003" for p in pieces)
+        assert sum(1 for p in pieces if p.part == "3003") == 2
+        assert sum(1 for p in pieces if p.part == _NODE_TILE_PART) == 2
 
     def test_lone_node_y(self):
         _, _, _, lone_bricks, _ = _build_node_pieces(*self._inputs())
-        assert lone_bricks[0].pos[1] == pytest.approx(-_BRICK_H_LDU)
+        brick = next(p for p in lone_bricks if p.part == "3003")
+        assert brick.pos[1] == pytest.approx(-_BRICK_H_LDU)
 
     def test_cluster_node_elevated_by_platform(self):
         # depth=0 → node_y = -(1*PLATE_H + BRICK_H)
         _, _, cluster_bricks, _, _ = _build_node_pieces(*self._inputs())
-        assert cluster_bricks["cluster_A"][0].pos[1] == pytest.approx(-_PLATE_H_LDU - _BRICK_H_LDU)
+        brick = next(p for p in cluster_bricks["cluster_A"] if p.part == "3003")
+        assert brick.pos[1] == pytest.approx(-_PLATE_H_LDU - _BRICK_H_LDU)
 
     def test_cluster_node_bricks_keyed_by_cluster(self):
+        # 1 brick + 1 tile per node in the cluster
         _, _, cluster_bricks, _, _ = _build_node_pieces(*self._inputs())
         assert "cluster_A" in cluster_bricks
-        assert len(cluster_bricks["cluster_A"]) == 1
+        assert len(cluster_bricks["cluster_A"]) == 2
 
     def test_lone_node_bricks_list(self):
+        # 1 brick + 1 tile per lone node
         _, _, _, lone_bricks, _ = _build_node_pieces(*self._inputs())
-        assert len(lone_bricks) == 1
+        assert len(lone_bricks) == 2
 
     def test_lone_node_color_from_provider(self):
         _, _, _, lone_bricks, _ = _build_node_pieces(*self._inputs())

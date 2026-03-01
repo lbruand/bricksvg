@@ -50,9 +50,10 @@ def extract_graph(script_path: str) -> dict:
 _CLUSTER_PALETTE = [1, 4, 2, 25, 41, 22]
 
 # LDraw heights in LDU (1 LDU = 0.4 mm; 1 stud = 8 mm = 20 LDU)
-_PLATE_H_LDU = 8   # height of a 1×1 plate (3024, height = 1/3 brick)
-_BRICK_H_LDU = 24  # height of a 2×2 brick (3003, height = 1 brick)
-_TILE_LDU    = 20  # one stud = one 1×1 tile width
+_PLATE_H_LDU    = 8      # height of a 1×1 plate (3024, height = 1/3 brick)
+_BRICK_H_LDU    = 24     # height of a 2×2 brick (3003, height = 1 brick)
+_TILE_LDU       = 20     # one stud = one 1×1 tile width
+_NODE_TILE_PART = "3068b"  # 2×2 flat tile placed on top of each node brick (no studs)
 
 
 @dataclass
@@ -332,20 +333,25 @@ def _build_node_pieces(
             node_y = float(-_BRICK_H_LDU)
         pos = np.array([float(ldx), node_y, float(ldz)])
 
-        piece = Piece(part="3003", color=color, pos=pos, rot=np.eye(3))
-        pieces.append(piece)
+        # Tile sits on top of the brick (more negative Y = higher in LDraw)
+        tile_y   = node_y - _PLATE_H_LDU
+        tile_pos = np.array([float(ldx), tile_y, float(ldz)])
+
+        piece = Piece(part="3003",           color=color, pos=pos,      rot=np.eye(3))
+        tile  = Piece(part=_NODE_TILE_PART,  color=color, pos=tile_pos, rot=np.eye(3))
+        pieces.extend([piece, tile])
         node_data.append({
-            "pos":       pos,
+            "pos":       tile_pos,   # icons project onto the tile's flat top face
             "icon_path": obj.get("image") or None,
             "label":     obj.get("label", ""),
             "half_w":    20,
         })
-        gvid_to_mid_y[gvid] = node_y + _BRICK_H_LDU / 2
+        gvid_to_mid_y[gvid] = node_y + _BRICK_H_LDU / 2  # mid of brick body for arrows
 
         if in_cluster:
-            cluster_node_bricks.setdefault(node_cluster[gvid], []).append(piece)
+            cluster_node_bricks.setdefault(node_cluster[gvid], []).extend([piece, tile])
         else:
-            lone_node_bricks.append(piece)
+            lone_node_bricks.extend([piece, tile])
 
     return pieces, node_data, cluster_node_bricks, lone_node_bricks, gvid_to_mid_y
 
