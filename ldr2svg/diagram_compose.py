@@ -270,12 +270,31 @@ def compose_diagram_svg(
         ))
 
     if piece_groups is not None:
-        # Globally sort all pieces across all groups back-to-front so pieces
-        # from different groups (e.g. lone nodes vs cluster bricks) never
-        # occlude each other incorrectly.
+        # Pass 1: platform tiles (3024) per cluster — each cluster in its own
+        # named <g> so they can be targeted by CSS / inspected in an SVG editor.
+        # Platforms are flat on the floor so no cross-cluster depth conflict.
+        for group_name, group_pieces in piece_groups:
+            platform_rows = sorted(
+                [piece_proj[id(p)] for p in group_pieces
+                 if p.part == "3024" and id(p) in piece_proj],
+                key=lambda r: (-r[1], r[0]),
+            )
+            if not platform_rows:
+                continue
+            grp = dwg.g(id=f"platform_{group_name}")
+            for _depth, _ldy, sx_px, sy_px, _ax, _ay, _iw, _ih, label in platform_rows:
+                def_id, dax, day = defs[label]
+                grp.add(dwg.use(
+                    f"#{def_id}",
+                    insert=(f"{cx(sx_px) - dax:.1f}px", f"{cy(sy_px) - day:.1f}px"),
+                ))
+            dwg.add(grp)
+
+        # Pass 2: node bricks + tiles (non-3024) globally sorted back-to-front
+        # so pieces from different clusters never occlude each other incorrectly.
         all_rows = sorted(
             [piece_proj[id(p)] for _, group_pieces in piece_groups
-             for p in group_pieces if id(p) in piece_proj],
+             for p in group_pieces if p.part != "3024" and id(p) in piece_proj],
             key=lambda r: (-r[1], r[0]),
         )
         for _depth, _ldy, sx_px, sy_px, _ax, _ay, _iw, _ih, label in all_rows:

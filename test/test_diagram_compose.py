@@ -412,20 +412,28 @@ class TestComposeDiagramSvg:
 
 
 # ---------------------------------------------------------------------------
-# compose_diagram_svg — piece_groups (flat globally-sorted rendering)
+# compose_diagram_svg — piece_groups (platform <g> + globally-sorted nodes)
 # ---------------------------------------------------------------------------
 
-def _make_piece_groups(renders):
-    """Build minimal piece_groups from _minimal_renders() pieces."""
+def _make_piece_groups_with_platform(renders):
+    """Build piece_groups that include a 3024 platform piece and a 3003 node brick."""
     all_pieces = [p for _, _, _, pl in renders.values() for p in pl]
-    return [("cluster_test", all_pieces[:1]), ("lone", all_pieces[1:])]
+    # Wrap the first piece as a 3024 platform tile so the grouping path is exercised.
+    platform_piece = Piece(part="3024", color=15,
+                           pos=np.array([0.0, 0.0, 0.0]), rot=np.eye(3))
+    # Re-use the same image as the 3003 piece (same size) so _build_defs finds it.
+    img = Image.new("RGBA", (100, 80))
+    from ldr2svg.compose import _piece_label
+    platform_label = _piece_label(platform_piece)
+    renders[platform_label] = (img, 50.0, 40.0, [platform_piece])
+    return [("cluster_test", [platform_piece] + all_pieces[:1]), ("lone", all_pieces[1:])]
 
 
 class TestComposeDiagramSvgGroups:
     def _run_grouped(self, tmp_path, name="grouped.svg"):
         renders = _minimal_renders()
         output = str(tmp_path / name)
-        piece_groups = _make_piece_groups(renders)
+        piece_groups = _make_piece_groups_with_platform(renders)
         compose_diagram_svg(renders, output, arrows=[], node_data=[],
                             piece_groups=piece_groups)
         return output, ET.parse(output).getroot()
@@ -434,9 +442,25 @@ class TestComposeDiagramSvgGroups:
         """All pieces from piece_groups must appear as <use> elements."""
         _, root = self._run_grouped(tmp_path)
         uses = root.findall(f".//{{{NS}}}use")
-        assert len(uses) == 2
+        # 1 platform (3024) + 2 node bricks (3003) = 3
+        assert len(uses) == 3
 
-    def test_piece_groups_produces_use_elements(self, tmp_path):
-        """piece_groups path emits <use> elements (not zero)."""
+    def test_platform_group_present(self, tmp_path):
+        """3024 tiles must be wrapped in a <g id='platform_cluster_test'>."""
         _, root = self._run_grouped(tmp_path)
-        assert len(root.findall(f".//{{{NS}}}use")) > 0
+        grp = root.find(f".//{{{NS}}}g[@id='platform_cluster_test']")
+        assert grp is not None
+
+    def test_platform_group_contains_use(self, tmp_path):
+        """The platform <g> must contain at least one <use> element."""
+        _, root = self._run_grouped(tmp_path)
+        grp = root.find(f".//{{{NS}}}g[@id='platform_cluster_test']")
+        assert grp is not None
+        uses = grp.findall(f"{{{NS}}}use")
+        assert len(uses) >= 1
+
+    def test_no_platform_group_for_lone(self, tmp_path):
+        """The 'lone' group has no 3024 pieces, so no platform <g id='platform_lone'>."""
+        _, root = self._run_grouped(tmp_path)
+        grp = root.find(f".//{{{NS}}}g[@id='platform_lone']")
+        assert grp is None
