@@ -121,10 +121,12 @@ def _icon_element(
     top_y = float(pos[1])
     ldz   = float(pos[2])
 
-    # Top-face corners in LDraw (Y = top of brick)
-    A = np.array([ldx - hw, top_y, ldz - hw])   # back-left
-    B = np.array([ldx + hw, top_y, ldz - hw])   # back-right
-    D = np.array([ldx - hw, top_y, ldz + hw])   # front-left
+    # Top-face corners in LDraw (Y = top of brick), inset by padding
+    _PAD = 4.0   # LDU inset on every edge (~20 % of a 20-LDU half-width)
+    hw_i = hw - _PAD
+    A = np.array([ldx - hw_i, top_y, ldz - hw_i])   # back-left
+    B = np.array([ldx + hw_i, top_y, ldz - hw_i])   # back-right
+    D = np.array([ldx - hw_i, top_y, ldz + hw_i])   # front-left
 
     ax, ay = _proj_canvas(A, cx, cy)
     bx, by = _proj_canvas(B, cx, cy)
