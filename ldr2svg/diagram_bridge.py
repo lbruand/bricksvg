@@ -489,8 +489,8 @@ def _build_cluster_label_data(
 ) -> list[dict]:
     """Return label metadata for each cluster platform.
 
-    Each entry has ``pos`` (LDraw XYZ at the front-centre of the platform
-    surface) and ``label`` (display text).
+    Each entry has ``pos`` (LDraw XYZ at the top-face centre of the three
+    studless label tiles) and ``label`` (display text).
     """
     result = []
     for cl in (c for c in cluster_objs if c["name"] in cluster_tile_extent):
@@ -498,9 +498,12 @@ def _build_cluster_label_data(
         ext   = cluster_tile_extent[name]
         depth = cluster_depth[name]
         cx    = float(ext.x0 + ext.x1) / 2.0
-        platform_y = float(-(depth + 1) * _PLATE_H_LDU)
+        # Top face of the label tiles: one plate above the platform surface
+        tile_top_y = float(-(depth + 1) * _PLATE_H_LDU - _PLATE_H_LDU)
+        # Z-centre of the front row (where the 3070b tiles are placed)
+        front_z = float(ext.z1 - _TILE_LDU // 2)
         result.append({
-            "pos":   np.array([cx, platform_y, float(ext.z1)]),
+            "pos":   np.array([cx, tile_top_y, front_z]),
             "label": cl.get("label") or name,
         })
     return result

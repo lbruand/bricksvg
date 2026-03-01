@@ -914,15 +914,15 @@ class TestBuildClusterLabelData:
         # TileExtent(0, 60, ...) → center X = 30
         assert result[0]["pos"][0] == pytest.approx(30.0)
 
-    def test_pos_z_is_front_edge(self):
+    def test_pos_z_is_tile_row_centre(self):
         result = _build_cluster_label_data(*self._inputs())
-        # TileExtent(..., 0, 40) → front Z = z1 = 40
-        assert result[0]["pos"][2] == pytest.approx(40.0)
+        # TileExtent(..., 0, 40) → front tile centre z = 40 - 10 = 30
+        assert result[0]["pos"][2] == pytest.approx(40.0 - _TILE_LDU // 2)
 
-    def test_pos_y_is_platform_surface(self):
+    def test_pos_y_is_label_tile_top_face(self):
         result = _build_cluster_label_data(*self._inputs())
-        # depth=0 → platform_y = -(0+1)*8 = -8
-        assert result[0]["pos"][1] == pytest.approx(-_PLATE_H_LDU)
+        # depth=0 → plate_y = -8; tile top face = -8 - 8 = -16
+        assert result[0]["pos"][1] == pytest.approx(-2 * _PLATE_H_LDU)
 
     def test_cluster_missing_from_extent_skipped(self):
         cluster_objs = [{"_gvid": 0, "nodes": [1], "name": "cluster_A", "label": "A"}]
