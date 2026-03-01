@@ -48,30 +48,28 @@ def _add_arrow_defs(dwg: svgwrite.Drawing) -> None:
     dwg.defs.add(marker)
 
 
-def _make_floor_arrow(
+def _make_arc_arrow(
     dwg: svgwrite.Drawing,
     from_pos: np.ndarray,
     to_pos: np.ndarray,
     cx,
     cy,
-    shorten_px: float,
 ):
-    """Return a shortened SVG line for one arrow, or None if the endpoints coincide."""
+    """Return a cubic-Bezier arc SVG path for one arrow, or None if endpoints coincide."""
     x0, y0 = _proj_canvas(from_pos, cx, cy)
     x1, y1 = _proj_canvas(to_pos,   cx, cy)
-    dx, dy = x1 - x0, y1 - y0
-    length = math.hypot(dx, dy)
-    if length < 1e-6:
+    dist = math.hypot(x1 - x0, y1 - y0)
+    if dist < 1e-6:
         return None
-    ux, uy = dx / length, dy / length
-    line = dwg.line(
-        start=(f"{x0:.1f}", f"{y0:.1f}"),
-        end=(f"{x1 - ux * shorten_px:.1f}", f"{y1 - uy * shorten_px:.1f}"),
+    lift = max(40.0, 0.35 * dist)
+    path = dwg.path(
+        d=f"M {x0:.1f},{y0:.1f} C {x0:.1f},{y0 - lift:.1f} {x1:.1f},{y1 - lift:.1f} {x1:.1f},{y1:.1f}",
         stroke="#888",
         stroke_width="1.5",
+        fill="none",
     )
-    line.attribs["marker-end"] = "url(#arrow)"
-    return line
+    path.attribs["marker-end"] = "url(#arrow)"
+    return path
 
 
 def _draw_floor_arrows(
@@ -79,14 +77,12 @@ def _draw_floor_arrows(
     arrows: list[tuple],
     cx,
     cy,
-    shorten_px: float = 25.0,
 ) -> None:
-    """Draw directed floor arrows connecting nodes."""
+    """Draw directed arc arrows connecting nodes."""
     grp = dwg.g(id="arrows")
-    lines = filter(None, (_make_floor_arrow(dwg, fp, tp, cx, cy, shorten_px)
-                          for fp, tp in arrows))
-    for line in lines:
-        grp.add(line)
+    paths = filter(None, (_make_arc_arrow(dwg, fp, tp, cx, cy) for fp, tp in arrows))
+    for path in paths:
+        grp.add(path)
     dwg.add(grp)
 
 

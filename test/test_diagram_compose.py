@@ -164,17 +164,17 @@ class TestDrawFloorArrows:
         dwg.save()
         return _parse_svg(tmp_path / name)
 
-    def _arrow_lines(self, root):
-        return root.findall(f".//{{{NS}}}line[@stroke='#888']")
+    def _arrow_paths(self, root):
+        return root.findall(f".//{{{NS}}}path[@stroke='#888']")
 
-    def test_empty_input_produces_no_lines(self, tmp_path):
+    def test_empty_input_produces_no_paths(self, tmp_path):
         root = self._run(tmp_path, [])
-        assert len(self._arrow_lines(root)) == 0
+        assert len(self._arrow_paths(root)) == 0
 
-    def test_one_arrow_produces_one_line(self, tmp_path):
+    def test_one_arrow_produces_one_path(self, tmp_path):
         arrows = [(_floor_pos(0, 0), _floor_pos(80, 0))]
         root = self._run(tmp_path, arrows)
-        assert len(self._arrow_lines(root)) == 1
+        assert len(self._arrow_paths(root)) == 1
 
     def test_arrow_count_matches_input(self, tmp_path):
         arrows = [
@@ -183,19 +183,19 @@ class TestDrawFloorArrows:
             (_floor_pos(160, 0), _floor_pos(240, 0)),
         ]
         root = self._run(tmp_path, arrows)
-        assert len(self._arrow_lines(root)) == 3
+        assert len(self._arrow_paths(root)) == 3
 
-    def test_lines_have_marker_end_attribute(self, tmp_path):
+    def test_paths_have_marker_end_attribute(self, tmp_path):
         arrows = [(_floor_pos(0, 0), _floor_pos(80, 0))]
         root = self._run(tmp_path, arrows)
-        line = self._arrow_lines(root)[0]
-        assert "marker-end" in line.attrib
-        assert "arrow" in line.attrib["marker-end"]
+        path = self._arrow_paths(root)[0]
+        assert "marker-end" in path.attrib
+        assert "arrow" in path.attrib["marker-end"]
 
     def test_coincident_points_skipped(self, tmp_path):
         arrows = [(_floor_pos(0, 0), _floor_pos(0, 0))]
         root = self._run(tmp_path, arrows, name="skip.svg")
-        assert len(self._arrow_lines(root)) == 0
+        assert len(self._arrow_paths(root)) == 0
 
     def test_arrows_group_present(self, tmp_path):
         root = self._run(tmp_path, [])
@@ -439,8 +439,8 @@ class TestComposeDiagramSvg:
     def test_arrow_count_in_svg(self, tmp_path):
         arrows = [(_floor_pos(0), _floor_pos(80)), (_floor_pos(80), _floor_pos(160))]
         _, root = self._run(tmp_path, arrows=arrows, name="arrows.svg")
-        lines = root.findall(f".//{{{NS}}}line[@stroke='#888']")
-        assert len(lines) == 2
+        paths = root.findall(f".//{{{NS}}}path[@stroke='#888']")
+        assert len(paths) == 2
 
     def test_label_text_content(self, tmp_path):
         _, root = self._run(tmp_path, node_data=_minimal_node_data(label="my-node"),

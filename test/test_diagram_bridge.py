@@ -393,13 +393,13 @@ class TestBuildLdrSceneEdges:
         _, arrows, _, _, _ = build_ldr_scene(_lone_graph())
         assert len(arrows) == 1
 
-    def test_arrow_positions_at_mid_y(self):
+    def test_arrow_positions_at_top_y(self):
         _, arrows, _, _, _ = build_ldr_scene(_lone_graph())
-        # Lone nodes → node_y = -BRICK_H_LDU; mid = node_y + BRICK_H_LDU/2
-        expected_mid_y = -_BRICK_H_LDU + _BRICK_H_LDU / 2
+        # Lone nodes → node_y = -BRICK_H_LDU; tile_y = node_y - PLATE_H_LDU
+        expected_top_y = -_BRICK_H_LDU - _PLATE_H_LDU
         for from_pos, to_pos in arrows:
-            assert from_pos[1] == pytest.approx(expected_mid_y)
-            assert to_pos[1] == pytest.approx(expected_mid_y)
+            assert from_pos[1] == pytest.approx(expected_top_y)
+            assert to_pos[1] == pytest.approx(expected_top_y)
 
     def test_arrow_endpoints_differ(self):
         _, arrows, _, _, _ = build_ldr_scene(_lone_graph())
@@ -814,15 +814,16 @@ class TestBuildNodePieces:
         _, _, _, lone_bricks, _ = _build_node_pieces(*self._inputs())
         assert lone_bricks[0].color == 1  # k8s → blue
 
-    def test_mid_y_lone_node(self):
-        _, _, _, _, gvid_to_mid_y = _build_node_pieces(*self._inputs())
-        assert gvid_to_mid_y[0] == pytest.approx(-_BRICK_H_LDU + _BRICK_H_LDU / 2)
+    def test_top_y_lone_node(self):
+        _, _, _, _, gvid_to_top_y = _build_node_pieces(*self._inputs())
+        # tile_y = node_y - PLATE_H_LDU = -BRICK_H_LDU - PLATE_H_LDU
+        assert gvid_to_top_y[0] == pytest.approx(-_BRICK_H_LDU - _PLATE_H_LDU)
 
-    def test_mid_y_cluster_node(self):
-        # depth=0 → node_y = -(PLATE_H + BRICK_H); mid = node_y + BRICK_H/2
-        _, _, _, _, gvid_to_mid_y = _build_node_pieces(*self._inputs())
-        expected = -(_PLATE_H_LDU + _BRICK_H_LDU) + _BRICK_H_LDU / 2
-        assert gvid_to_mid_y[1] == pytest.approx(expected)
+    def test_top_y_cluster_node(self):
+        # depth=0 → node_y = -(PLATE_H + BRICK_H); tile_y = node_y - PLATE_H
+        _, _, _, _, gvid_to_top_y = _build_node_pieces(*self._inputs())
+        expected = -(_PLATE_H_LDU + _BRICK_H_LDU) - _PLATE_H_LDU
+        assert gvid_to_top_y[1] == pytest.approx(expected)
 
 
 # ---------------------------------------------------------------------------
@@ -1074,44 +1075,44 @@ class TestAssemblePieceGroups:
 # ---------------------------------------------------------------------------
 
 class TestBuildEdgePositions:
-    _mid_y = {0: -12.0, 1: -12.0}
+    _top_y = {0: -32.0, 1: -32.0}
 
     def test_known_edge_produces_pair(self):
-        result = _build_edge_positions([{"tail": 0, "head": 1}], {0: (0, 0), 1: (80, 0)}, self._mid_y)
+        result = _build_edge_positions([{"tail": 0, "head": 1}], {0: (0, 0), 1: (80, 0)}, self._top_y)
         assert len(result) == 1
 
     def test_positions_are_numpy_arrays(self):
         from_pos, to_pos = _build_edge_positions(
-            [{"tail": 0, "head": 1}], {0: (0, 0), 1: (80, 0)}, self._mid_y
+            [{"tail": 0, "head": 1}], {0: (0, 0), 1: (80, 0)}, self._top_y
         )[0]
         assert isinstance(from_pos, np.ndarray)
         assert isinstance(to_pos, np.ndarray)
 
-    def test_positions_at_mid_y(self):
+    def test_positions_at_top_y(self):
         from_pos, to_pos = _build_edge_positions(
-            [{"tail": 0, "head": 1}], {0: (0, 0), 1: (80, 0)}, self._mid_y
+            [{"tail": 0, "head": 1}], {0: (0, 0), 1: (80, 0)}, self._top_y
         )[0]
-        assert from_pos[1] == pytest.approx(-12.0)
-        assert to_pos[1] == pytest.approx(-12.0)
+        assert from_pos[1] == pytest.approx(-32.0)
+        assert to_pos[1] == pytest.approx(-32.0)
 
-    def test_xz_offset_toward_dest(self):
-        # Pure X direction: tail=(0,0), head=(80,0) → offset by _TILE_LDU=20
+    def test_no_xz_offset(self):
+        # Endpoints are the exact node centres with no XZ displacement
         from_pos, to_pos = _build_edge_positions(
-            [{"tail": 0, "head": 1}], {0: (0, 0), 1: (80, 0)}, self._mid_y
+            [{"tail": 0, "head": 1}], {0: (0, 0), 1: (80, 0)}, self._top_y
         )[0]
-        assert from_pos[0] == pytest.approx(_TILE_LDU)
-        assert to_pos[0] == pytest.approx(80 - _TILE_LDU)
+        assert from_pos[0] == pytest.approx(0.0)
+        assert to_pos[0] == pytest.approx(80.0)
         assert from_pos[2] == pytest.approx(0.0)
         assert to_pos[2] == pytest.approx(0.0)
 
     def test_unknown_tail_skipped(self):
-        assert _build_edge_positions([{"tail": 99, "head": 1}], {0: (0, 0), 1: (80, 0)}, self._mid_y) == []
+        assert _build_edge_positions([{"tail": 99, "head": 1}], {0: (0, 0), 1: (80, 0)}, self._top_y) == []
 
     def test_unknown_head_skipped(self):
-        assert _build_edge_positions([{"tail": 0, "head": 99}], {0: (0, 0)}, {0: -12.0}) == []
+        assert _build_edge_positions([{"tail": 0, "head": 99}], {0: (0, 0)}, {0: -32.0}) == []
 
     def test_empty_edges(self):
-        assert _build_edge_positions([], {0: (0, 0)}, {0: -12.0}) == []
+        assert _build_edge_positions([], {0: (0, 0)}, {0: -32.0}) == []
 
 
 # ---------------------------------------------------------------------------
