@@ -1,0 +1,22 @@
+graph LR
+    gcp_lb["GCP LB"]
+
+    subgraph Kubernetes
+        subgraph Nginx
+            nginx[" "]
+        end
+        subgraph MyApp
+            myapp_ing[" "]
+            subgraph Pods
+                myapp_pods["myapp"]
+            end
+        end
+        subgraph MySQL
+            myapp_db["myapp-db"]
+        end
+    end
+
+    gcp_lb --> nginx
+    nginx --> myapp_ing
+    myapp_ing --> myapp_pods
+    myapp_pods --> myapp_db

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""diagram2svg.py — Render a diagrams-library script as an isometric brick SVG.
+"""mermaid2svg.py — Render a Mermaid flowchart as an isometric brick SVG.
 
 Usage
 -----
-    uv run python scripts/diagram2svg.py <diagram.py> [-o output.svg]
+    uv run python scripts/mermaid2svg.py <diagram.mmd> [-o output.svg]
 """
 
 import argparse
@@ -13,15 +13,15 @@ from pathlib import Path
 # Allow running from the project root without a package install
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from ldr2svg.diagram_bridge import extract_graph
+from ldr2svg.mermaid_bridge import extract_graph
 from ldr2svg.pipeline import run_lego_pipeline
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Render a diagrams-library Python script as an isometric brick SVG."
+        description="Render a Mermaid flowchart as an isometric brick SVG."
     )
-    parser.add_argument("input",  help="Input diagram.py script path")
+    parser.add_argument("input",  help="Input Mermaid file path (.mmd)")
     parser.add_argument("-o", "--output", help="Output SVG path (default: <input>_bricks.svg)")
     parser.add_argument(
         "--keep-pngs", action="store_true",
