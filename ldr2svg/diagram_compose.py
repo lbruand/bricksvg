@@ -169,26 +169,35 @@ def _draw_labels(
     cx,
     cy,
 ) -> None:
-    """Draw isometric-skewed text labels at the front-floor foot of each brick."""
+    """Draw labels on the left-hand (front/+Z) face of each node brick.
+
+    The face transform is: scaleY(cos30°) → skewX(30°) → rotate(30° CW),
+    which maps the text baseline along the isometric +X axis and character
+    height straight down in screen space.
+    Combined matrix: matrix(0.866025, 0.5, 0, 1, tx, ty).
+    Anchor: top-centre of the front (+Z) face of the tile.
+    """
     grp = dwg.g(id="labels")
     for nd in (n for n in node_data if n.get("label", "")):
         pos = nd["pos"]
         hw  = nd["half_w"]
         ldx = float(pos[0])
+        ldy = float(pos[1])
         ldz = float(pos[2])
 
-        # Anchor: front-left floor corner of the brick; text extends leftward.
-        lx, ly = _proj_canvas(np.array([ldx - hw, 0.0, ldz + hw]), cx, cy)
+        # Anchor at the top-centre of the front face of the tile/brick
+        lx, ly = _proj_canvas(np.array([ldx, ldy, ldz + hw]), cx, cy)
 
         text_el = dwg.text(
             nd["label"],
             insert=(0, 0),
             font_size="9",
             fill="#333",
-            text_anchor="end",
+            text_anchor="middle",
         )
+        # scaleY(cos30°) → skewX(30°) → rotate(30° CW)
         text_el.attribs["transform"] = (
-            f"translate({lx:.1f},{ly:.1f}) scale(1,0.5) rotate(-30)"
+            f"matrix(0.866025,0.5,0,1,{lx:.1f},{ly:.1f})"
         )
         grp.add(text_el)
     dwg.add(grp)

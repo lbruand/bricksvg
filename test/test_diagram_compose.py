@@ -296,17 +296,21 @@ class TestDrawLabels:
         text = self._texts(root)[0]
         assert text.text == "my-service"
 
-    def test_text_has_translate_scale_rotate_transform(self, tmp_path):
+    def test_text_has_matrix_transform(self, tmp_path):
         root = self._run(tmp_path, _minimal_node_data())
         transform = self._texts(root)[0].attrib.get("transform", "")
-        assert "translate" in transform
-        assert "scale" in transform
-        assert "rotate" in transform
+        assert transform.startswith("matrix(")
 
-    def test_rotate_minus_30(self, tmp_path):
+    def test_matrix_encodes_front_face_isometric(self, tmp_path):
+        """a=0.866025, b=0.5, c=0, d=1 — left/front face projection."""
         root = self._run(tmp_path, _minimal_node_data())
         transform = self._texts(root)[0].attrib.get("transform", "")
-        assert "rotate(-30)" in transform
+        inner = transform[len("matrix("):-1]
+        a, b, c, d, *_ = [v.strip() for v in inner.split(",")]
+        assert float(a) == pytest.approx(0.866025, abs=1e-4)
+        assert float(b) == pytest.approx(0.5,      abs=1e-4)
+        assert float(c) == pytest.approx(0.0,      abs=1e-4)
+        assert float(d) == pytest.approx(1.0,      abs=1e-4)
 
     def test_mixed_empty_and_nonempty_labels(self, tmp_path):
         node_data = [
