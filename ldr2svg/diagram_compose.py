@@ -179,19 +179,22 @@ def _draw_labels(
     """
     grp = dwg.g(id="labels")
     for nd in (n for n in node_data if n.get("label", "")):
-        pos = nd["pos"]
-        hw  = nd["half_w"]
-        ldx = float(pos[0])
-        ldy = float(pos[1])
-        ldz = float(pos[2])
+        pos  = nd["pos"]
+        hw   = nd["half_w"]
+        hh   = nd["half_h"]
+        ldx  = float(pos[0])
+        ldy  = float(pos[1])
+        ldz  = float(pos[2])
 
-        # Anchor at the top-centre of the front face of the tile/brick
-        lx, ly = _proj_canvas(np.array([ldx, ldy, ldz + hw]), cx, cy)
+        # Anchor at the vertical centre of the front (+Z) face.
+        # pos[1] is the tile top face; adding half_h reaches the mid-height
+        # of the tile+brick assembly in LDraw Y (down = more positive).
+        lx, ly = _proj_canvas(np.array([ldx, ldy + hh, ldz + hw]), cx, cy)
 
         text_el = dwg.text(
             nd["label"],
             insert=(0, 0),
-            font_size="9",
+            font_size="14",
             fill="#333",
             text_anchor="middle",
         )

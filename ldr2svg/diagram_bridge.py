@@ -346,7 +346,8 @@ def _build_node_pieces(
             "pos":       tile_pos,   # icons project onto the tile's flat top face
             "icon_path": obj.get("image") or None,
             "label":     obj.get("label", ""),
-            "half_w":    20,
+            "half_w":    _TILE_LDU,                       # 20 LDU = half the 2×2 footprint
+            "half_h":    (_PLATE_H_LDU + _BRICK_H_LDU) // 2,  # 16 LDU = half the total height
         })
         gvid_to_mid_y[gvid] = node_y + _BRICK_H_LDU / 2  # mid of brick body for arrows
 

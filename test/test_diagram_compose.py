@@ -65,6 +65,7 @@ def _minimal_node_data(icon_path=None, label="test-node"):
         "icon_path": icon_path,
         "label":     label,
         "half_w":    20,
+        "half_h":    16,
     }]
 
 
@@ -256,9 +257,9 @@ class TestDrawIcons:
     def test_multiple_icons(self, tmp_path):
         icon = _make_icon(tmp_path)
         node_data = [
-            {"pos": _node_pos(  0), "icon_path": icon,  "label": "a", "half_w": 20},
-            {"pos": _node_pos( 80), "icon_path": None,  "label": "b", "half_w": 20},
-            {"pos": _node_pos(160), "icon_path": icon,  "label": "c", "half_w": 20},
+            {"pos": _node_pos(  0), "icon_path": icon,  "label": "a", "half_w": 20, "half_h": 16},
+            {"pos": _node_pos( 80), "icon_path": None,  "label": "b", "half_w": 20, "half_h": 16},
+            {"pos": _node_pos(160), "icon_path": icon,  "label": "c", "half_w": 20, "half_h": 16},
         ]
         root = self._run(tmp_path, node_data, name="multi.svg")
         assert len(self._images(root)) == 2
@@ -314,9 +315,9 @@ class TestDrawLabels:
 
     def test_mixed_empty_and_nonempty_labels(self, tmp_path):
         node_data = [
-            {"pos": _node_pos(  0), "label": "A", "half_w": 20},
-            {"pos": _node_pos( 80), "label": "",  "half_w": 20},
-            {"pos": _node_pos(160), "label": "C", "half_w": 20},
+            {"pos": _node_pos(  0), "label": "A", "half_w": 20, "half_h": 16},
+            {"pos": _node_pos( 80), "label": "",  "half_w": 20, "half_h": 16},
+            {"pos": _node_pos(160), "label": "C", "half_w": 20, "half_h": 16},
         ]
         root = self._run(tmp_path, node_data, name="mixed.svg")
         assert len(self._texts(root)) == 2
