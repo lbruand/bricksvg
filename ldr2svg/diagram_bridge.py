@@ -363,8 +363,15 @@ def _build_platform_pieces(
     cluster_tile_extent: dict[str, TileExtent],
     cluster_depth: dict[str, int],
     cluster_color: dict[str, int],
+    exclude: dict[str, set[tuple[int, int]]] | None = None,
 ) -> tuple[list[Piece], dict[str, list[Piece]]]:
     """Build 1×1 plate tiles covering each cluster's XZ extent.
+
+    Parameters
+    ----------
+    exclude:
+        Per-cluster set of ``(x_centre, z_centre)`` integer positions to skip
+        (used to leave gaps where studless label tiles will be placed instead).
 
     Returns
     -------
@@ -381,10 +388,14 @@ def _build_platform_pieces(
         ext  = cluster_tile_extent[name]
         plate_y = float(-(cluster_depth[name] + 1) * _PLATE_H_LDU)
         color   = cluster_color.get(name, 15)
+        skip    = (exclude or {}).get(name, set())
 
         for x in range(ext.x0, ext.x1, _TILE_LDU):
             for z in range(ext.z0, ext.z1, _TILE_LDU):
-                pos = np.array([float(x + _TILE_LDU // 2), plate_y, float(z + _TILE_LDU // 2)])
+                xc, zc = x + _TILE_LDU // 2, z + _TILE_LDU // 2
+                if (xc, zc) in skip:
+                    continue
+                pos = np.array([float(xc), plate_y, float(zc)])
                 piece = Piece(part=_PLATFORM_TILE_PART, color=color, pos=pos, rot=np.eye(3))
                 pieces.append(piece)
                 cluster_platform_tiles.setdefault(name, []).append(piece)
@@ -400,8 +411,8 @@ def _build_cluster_label_tiles(
 ) -> tuple[list[Piece], dict[str, list[Piece]]]:
     """Place up to three 1×1 flat (no-stud) tiles at the front-centre of each cluster.
 
-    The tiles sit on top of the cluster's 1×1 plates (one plate-height above
-    the platform surface) and provide a writing surface for the cluster label.
+    The tiles are at the same height as the platform plates and *replace* the
+    3024 studs at those positions, providing a flush writing surface.
 
     Returns
     -------
@@ -419,8 +430,8 @@ def _build_cluster_label_tiles(
         depth = cluster_depth[name]
         color = cluster_color.get(name, 15)
 
-        # One plate-height above the platform surface
-        label_tile_y = float(-(depth + 1) * _PLATE_H_LDU - _PLATE_H_LDU)
+        # Same level as platform tiles — replaces the 3024 plate at those positions
+        label_tile_y = float(-(depth + 1) * _PLATE_H_LDU)
 
         # X-centres of every tile column in the platform
         all_xs = [x + _TILE_LDU // 2 for x in range(ext.x0, ext.x1, _TILE_LDU)]
@@ -571,12 +582,18 @@ def build_ldr_scene(
         node_objs, gvid_to_ld, node_cluster, cluster_color, cluster_depth
     )
 
-    platform_pieces, cluster_platform_tiles = _build_platform_pieces(
-        cluster_objs, cluster_tile_extent, cluster_depth, cluster_color
-    )
-
+    # Build label tiles first so their positions can be excluded from the 3024 platform
     label_tile_pieces, cluster_label_tiles = _build_cluster_label_tiles(
         cluster_objs, cluster_tile_extent, cluster_depth, cluster_color
+    )
+    label_exclude: dict[str, set[tuple[int, int]]] = {
+        name: {(int(p.pos[0]), int(p.pos[2])) for p in tiles}
+        for name, tiles in cluster_label_tiles.items()
+    }
+
+    platform_pieces, cluster_platform_tiles = _build_platform_pieces(
+        cluster_objs, cluster_tile_extent, cluster_depth, cluster_color,
+        exclude=label_exclude,
     )
     # Merge label tiles into platform groups so they render in the platform <g>
     for name, tiles in cluster_label_tiles.items():

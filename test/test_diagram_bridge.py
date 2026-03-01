@@ -870,6 +870,13 @@ class TestBuildPlatformPieces:
         pieces, _ = _build_platform_pieces(cluster_objs, {}, {"cluster_A": 0}, {})
         assert pieces == []
 
+    def test_excluded_positions_skipped(self):
+        # extent (0,40, 0,40) → 4 tiles; exclude one → 3 tiles
+        pieces, _ = _build_platform_pieces(
+            *self._inputs(), exclude={"cluster_A": {(10, 10)}}
+        )
+        assert len(pieces) == 3
+
 
 # ---------------------------------------------------------------------------
 # Step: _build_cluster_label_data
@@ -965,11 +972,11 @@ class TestBuildClusterLabelTiles:
         for p in pieces:
             assert p.pos[2] == pytest.approx(40 - _TILE_LDU // 2)
 
-    def test_tiles_y_one_plate_above_platform(self):
-        # depth=0 → platform_y = -8; label tile y = -8 - 8 = -16
+    def test_tiles_y_same_as_platform(self):
+        # depth=0 → plate_y = -(0+1)*8 = -8 (same level as 3024 tiles they replace)
         pieces, _ = _build_cluster_label_tiles(*self._inputs())
         for p in pieces:
-            assert p.pos[1] == pytest.approx(-2 * _PLATE_H_LDU)
+            assert p.pos[1] == pytest.approx(-_PLATE_H_LDU)
 
     def test_tiles_centred_on_platform(self):
         # Extent (0,60) → columns at 10,30,50; centre=30; all 3 chosen
