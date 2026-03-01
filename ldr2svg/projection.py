@@ -35,7 +35,7 @@ def ldraw_to_os(pos_ld: np.ndarray, rot_ld: np.ndarray) -> np.ndarray:
 CAMERA_RX = math.degrees(math.acos(1 / math.sqrt(3)))  # ≈ 54.74°
 CAMERA_RZ = 45.0   # degrees spin (around Z)
 CAMERA_D  = 300.0  # camera distance (mm) — controls scale
-IMG_PX    = 800    # render each piece into a square IMG_PX × IMG_PX PNG
+IMG_PX    = 1200    # render each piece into a square IMG_PX × IMG_PX PNG
 
 # OpenSCAD ortho scale: viewport covers 2*D*tan(fov/2) mm → IMG_PX pixels.
 _OPENSCAD_FOV_DEG = 22.5
