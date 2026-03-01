@@ -3,6 +3,7 @@
 Render LDraw/LeoCAD (`.ldr`) scenes to clean isometric SVG brick illustrations.
 
 [![CI](https://github.com/lbruand/bricksvg/actions/workflows/ci.yml/badge.svg)](https://github.com/lbruand/bricksvg/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE.md)
 [![Ruff](https://img.shields.io/badge/lint-ruff-261230)](https://github.com/astral-sh/ruff)
 [![ty](https://img.shields.io/badge/type--check-ty-261230)](https://github.com/astral-sh/ty)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
@@ -53,6 +54,14 @@ Slow integration tests (require OpenSCAD; use `xvfb-run` on headless systems):
 ```bash
 xvfb-run uv run pytest test/ -v
 ```
+
+## How to import your svg into google slides
+
+ 1. Load the svg into a LibreOffice presentation ( tested on version : Version: 24.2.7.2 (X86_64) / LibreOffice Community
+Build ID: 420(Build:2))
+ 2. Click on the image. Contextual menu : Break the SVG
+ 3. Save the image in format pptx ( Microsoft PowerPoint 2007+)
+ 4. Upload the pptx into google slides 
 
 ## Credits and licences
 
