@@ -1,7 +1,5 @@
 """diagram_compose.py — SVG composition for diagram2svg output."""
 
-import io
-import base64
 import math
 
 import numpy as np
@@ -13,11 +11,11 @@ from .compose import (
     _project_pieces, _project_piece, _canvas_bounds,
     _build_defs, _build_defs_masked,
     _piece_label_no_color,
+    _img_to_data_uri, _place_masked_piece, _draw_grid,
 )
-from .parts import ldraw_rgb
+from .parts import Piece, ldraw_rgb
 from .projection import project_ldraw, PX_PER_MM
-from .grid import _grid_params, _grid_corner_sx_sy, _draw_isometric_grid
-from .parts import Piece
+from .grid import _grid_params, _grid_corner_sx_sy
 
 
 # ---------------------------------------------------------------------------
@@ -133,11 +131,7 @@ def _icon_element(
     dx, dy = _proj_canvas(D, cx, cy)
 
     # Affine: image (0,0)→A, (W,0)→B, (0,H)→D
-    buf = io.BytesIO()
-    icon.save(buf, format="PNG")
-    uri = f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode()}"
-
-    img_el = dwg.image(uri, insert=("0px", "0px"), size=(f"{W}px", f"{H}px"))
+    img_el = dwg.image(_img_to_data_uri(icon), insert=("0px", "0px"), size=(f"{W}px", f"{H}px"))
     img_el.attribs["preserveAspectRatio"] = "none"
     img_el.attribs["transform"] = (
         f"matrix({(bx-ax)/W:.6f},{(by-ay)/W:.6f},"
@@ -309,9 +303,7 @@ def compose_diagram_svg(
     dwg.add(dwg.rect((0, 0), ("100%", "100%"), fill="#f8f8f0"))
 
     # 2. Grid
-    if grid:
-        fy, gx0, gx1, gz0, gz1 = grid
-        _draw_isometric_grid(dwg, fy, gx0, gx1, gz0, gz1, cx, cy)
+    _draw_grid(dwg, grid, cx, cy)
 
     # Arrow marker in <defs>
     _add_arrow_defs(dwg)
@@ -324,26 +316,15 @@ def compose_diagram_svg(
                                       label_fn=_piece_label_no_color)
             for piece, iw, ih, ax, ay in pngs
         }
-        # colour lookup: piece id → hex colour string
-        piece_hex: dict[int, str] = {}
-        for piece, *_ in pngs:
-            r, g, b = ldraw_rgb(piece.color)
-            piece_hex[id(piece)] = f"#{r:02x}{g:02x}{b:02x}"
+        piece_hex: dict[int, str] = {
+            id(piece): "#{:02x}{:02x}{:02x}".format(*ldraw_rgb(piece.color))
+            for piece, *_ in pngs
+        }
 
         def _place_masked(grp, piece: Piece, sx_px: float, sy_px: float, label: str) -> None:
             shadow_id, mask_id, dax, day, iw, ih = defs_m[label]
-            x = f"{cx(sx_px) - dax:.1f}"
-            y = f"{cy(sy_px) - day:.1f}"
-            g = dwg.g(style="isolation: isolate",
-                      transform=f"translate({x},{y})")
-            rect = dwg.rect(insert=("0", "0"), size=(str(iw), str(ih)),
-                            fill=piece_hex[id(piece)])
-            rect.attribs["mask"] = f"url(#{mask_id})"
-            g.add(rect)
-            use_el = dwg.use(f"#{shadow_id}")
-            use_el.attribs["style"] = "mix-blend-mode: multiply"
-            g.add(use_el)
-            grp.add(g)
+            _place_masked_piece(dwg, grp, shadow_id, mask_id, dax, day, iw, ih,
+                                sx_px, sy_px, piece_hex[id(piece)], cx, cy)
 
         defs: dict[str, tuple[str, float, float]] = {}  # not used in masked path
     else:

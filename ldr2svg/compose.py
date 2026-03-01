@@ -22,26 +22,92 @@ class _SvgMask(svgwrite.container.Group):
     elementname = "mask"
 
 
-def _piece_label(piece: Piece) -> str:
-    """Human-readable cache-key label for SVG comments."""
+# ---------------------------------------------------------------------------
+# Small shared helpers
+# ---------------------------------------------------------------------------
+
+def _fmt_rot_rows(piece: Piece) -> str:
+    """Format the rotation matrix as a compact string for use in piece labels."""
     def fmt_val(v: float) -> str:
         return f"{round(v)}" if abs(v - round(v)) < 1e-6 else f"{v:.3f}"
-    rows = "[" + ",".join(
+    return "[" + ",".join(
         "[" + ",".join(fmt_val(v) for v in row) + "]"
         for row in piece.rot
     ) + "]"
-    return f"{piece.part} color={piece.color} rot={rows}"
+
+
+def _hash_label(label: str) -> str:
+    """Return an 8-character SHA-256 hex digest of *label*."""
+    return hashlib.sha256(label.encode()).hexdigest()[:8]
+
+
+def _img_to_data_uri(img: Image.Image) -> str:
+    """Encode *img* as a base64 PNG data URI."""
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode()}"
+
+
+def _place_masked_piece(
+    dwg: svgwrite.Drawing,
+    parent,
+    shadow_id: str,
+    mask_id: str,
+    dax: float,
+    day: float,
+    iw: int,
+    ih: int,
+    sx_px: float,
+    sy_px: float,
+    hex_color: str,
+    cx: Callable[[float], float],
+    cy: Callable[[float], float],
+) -> None:
+    """Emit one masked piece instance into *parent*.
+
+    Renders as::
+
+        <g style="isolation: isolate" transform="translate(x,y)">
+          <rect fill="hex_color" mask="url(#alpha-…)"/>
+          <use href="#shadow-…" style="mix-blend-mode: multiply"/>
+        </g>
+    """
+    x = f"{cx(sx_px) - dax:.1f}"
+    y = f"{cy(sy_px) - day:.1f}"
+    grp = dwg.g(style="isolation: isolate", transform=f"translate({x},{y})")
+    rect = dwg.rect(insert=("0", "0"), size=(str(iw), str(ih)), fill=hex_color)
+    rect.attribs["mask"] = f"url(#{mask_id})"
+    grp.add(rect)
+    use_el = dwg.use(f"#{shadow_id}")
+    use_el.attribs["style"] = "mix-blend-mode: multiply"
+    grp.add(use_el)
+    parent.add(grp)
+
+
+def _draw_grid(
+    dwg: svgwrite.Drawing,
+    grid: tuple | None,
+    cx: Callable[[float], float],
+    cy: Callable[[float], float],
+) -> None:
+    """Draw the isometric floor grid if grid params are present."""
+    if grid:
+        fy, gx0, gx1, gz0, gz1 = grid
+        _draw_isometric_grid(dwg, fy, gx0, gx1, gz0, gz1, cx, cy)
+
+
+# ---------------------------------------------------------------------------
+# Piece label / projection
+# ---------------------------------------------------------------------------
+
+def _piece_label(piece: Piece) -> str:
+    """Human-readable cache-key label (includes colour)."""
+    return f"{piece.part} color={piece.color} rot={_fmt_rot_rows(piece)}"
 
 
 def _piece_label_no_color(piece: Piece) -> str:
-    """Cache-key excluding color — for masked/white rendering (one render per part+rotation)."""
-    def fmt_val(v: float) -> str:
-        return f"{round(v)}" if abs(v - round(v)) < 1e-6 else f"{v:.3f}"
-    rows = "[" + ",".join(
-        "[" + ",".join(fmt_val(v) for v in row) + "]"
-        for row in piece.rot
-    ) + "]"
-    return f"{piece.part} rot={rows}"
+    """Cache-key excluding colour — one render per part+rotation."""
+    return f"{piece.part} rot={_fmt_rot_rows(piece)}"
 
 
 def _project_piece(
@@ -92,19 +158,22 @@ def _canvas_bounds(
     return W, H, min_x, min_y
 
 
+# ---------------------------------------------------------------------------
+# SVG <defs> builders
+# ---------------------------------------------------------------------------
+
 def _make_dwg_image(
     label: str, img: Image.Image, anchor_x: float, anchor_y: float,
     dwg: svgwrite.Drawing,
 ) -> tuple[str, float, float, svgwrite.image.Image]:
     """Encode img as a base64 PNG and return (def_id, ax, ay, dwg_image)."""
     part_name = label.split()[0]
-    def_id    = f"{part_name}-{hashlib.sha256(label.encode()).hexdigest()[:8]}"
+    def_id    = f"{part_name}-{_hash_label(label)}"
     iw, ih    = img.size
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    uri = f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode()}"
-    return def_id, anchor_x, anchor_y, dwg.image(uri, insert=("0px", "0px"),
-                                                  size=(f"{iw}px", f"{ih}px"), id=def_id)
+    return def_id, anchor_x, anchor_y, dwg.image(
+        _img_to_data_uri(img), insert=("0px", "0px"),
+        size=(f"{iw}px", f"{ih}px"), id=def_id,
+    )
 
 
 def _build_defs(
@@ -130,39 +199,21 @@ def _build_defs_masked(
     - A ``<mask id="alpha-{sha}">`` element whose content is the alpha channel
       of the white render encoded as a greyscale PNG.
 
-    In the SVG, each piece instance is composed as::
-
-        <g style="isolation: isolate" transform="translate(x, y)">
-          <rect … fill="#color" mask="url(#alpha-{sha})"/>
-          <use href="#shadow-{sha}" style="mix-blend-mode: multiply"/>
-        </g>
-
-    The rect supplies the target colour; the white render (with multiply
-    blend) darkens the colour where shadow pixels appear, leaving highlight
-    pixels unchanged.
-
     Returns label → (shadow_id, mask_id, ax, ay, iw, ih).
     """
     result = {}
     for label, (img, ax, ay, _pieces) in renders.items():
         iw, ih = img.size
-        sha = hashlib.sha256(label.encode()).hexdigest()[:8]
+        sha = _hash_label(label)
 
-        # Shadow image (white render) — referenced by <use> with multiply blend
         shadow_id = f"shadow-{sha}"
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        uri = f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode()}"
-        shadow_img = dwg.image(uri, insert=("0", "0"),
-                               size=(str(iw), str(ih)), id=shadow_id)
-        dwg.defs.add(shadow_img)
+        dwg.defs.add(dwg.image(
+            _img_to_data_uri(img), insert=("0", "0"),
+            size=(str(iw), str(ih)), id=shadow_id,
+        ))
 
-        # Alpha mask — greyscale PNG of the alpha channel; white = opaque
         mask_id = f"alpha-{sha}"
         alpha_ch = img.split()[3]          # PIL Image, mode='L'
-        alpha_buf = io.BytesIO()
-        alpha_ch.save(alpha_buf, format="PNG")
-        alpha_uri = f"data:image/png;base64,{base64.b64encode(alpha_buf.getvalue()).decode()}"
         mask_el = _SvgMask(id=mask_id)
         mask_el["maskContentUnits"] = "userSpaceOnUse"
         mask_el["maskUnits"] = "userSpaceOnUse"
@@ -170,7 +221,10 @@ def _build_defs_masked(
         mask_el["y"] = "0"
         mask_el["width"] = str(iw)
         mask_el["height"] = str(ih)
-        mask_el.add(dwg.image(alpha_uri, insert=("0", "0"), size=(str(iw), str(ih))))
+        mask_el.add(dwg.image(
+            _img_to_data_uri(alpha_ch.convert("RGBA")),
+            insert=("0", "0"), size=(str(iw), str(ih)),
+        ))
         dwg.defs.add(mask_el)
 
         result[label] = (shadow_id, mask_id, ax, ay, iw, ih)
@@ -184,6 +238,10 @@ def _inject_def_comments(output: str, defs: dict[str, tuple]) -> None:
     svg_text = re.sub(r"(<image\b)", lambda m: f"<!-- {next(it)} -->\n      {m.group(1)}", svg_text)
     Path(output).write_text(svg_text)
 
+
+# ---------------------------------------------------------------------------
+# Top-level compose
+# ---------------------------------------------------------------------------
 
 def compose_svg(
     renders: dict[str, tuple[Image.Image, float, float, list[Piece]]],
@@ -211,10 +269,7 @@ def compose_svg(
 
     dwg = svgwrite.Drawing(output, size=(f"{W}px", f"{H}px"))
     dwg.add(dwg.rect((0, 0), ("100%", "100%"), fill="#f8f8f0"))
-
-    if grid:
-        fy, gx0, gx1, gz0, gz1 = grid
-        _draw_isometric_grid(dwg, fy, gx0, gx1, gz0, gz1, cx, cy)
+    _draw_grid(dwg, grid, cx, cy)
 
     if masked:
         defs_m = _build_defs_masked(dwg, renders)
@@ -222,7 +277,6 @@ def compose_svg(
             id(p): _project_piece(p, iw, ih, ax, ay, label_fn=_piece_label_no_color)
             for p, iw, ih, ax, ay in pngs
         }
-        # (label, sx_px) → piece — used to recover colour when placing
         lsx_to_piece: dict[tuple[str, float], Piece] = {
             (row[8], row[2]): p
             for p, *_ in pngs
@@ -232,17 +286,8 @@ def compose_svg(
             piece = lsx_to_piece[(label, sx_px)]
             shadow_id, mask_id, dax, day, iw, ih = defs_m[label]
             r, g, b = ldraw_rgb(piece.color)
-            x = f"{cx(sx_px) - dax:.1f}"
-            y = f"{cy(sy_px) - day:.1f}"
-            grp = dwg.g(style="isolation: isolate", transform=f"translate({x},{y})")
-            rect = dwg.rect(insert=("0", "0"), size=(str(iw), str(ih)),
-                            fill=f"#{r:02x}{g:02x}{b:02x}")
-            rect.attribs["mask"] = f"url(#{mask_id})"
-            grp.add(rect)
-            use_el = dwg.use(f"#{shadow_id}")
-            use_el.attribs["style"] = "mix-blend-mode: multiply"
-            grp.add(use_el)
-            dwg.add(grp)
+            _place_masked_piece(dwg, dwg, shadow_id, mask_id, dax, day, iw, ih,
+                                sx_px, sy_px, f"#{r:02x}{g:02x}{b:02x}", cx, cy)
         dwg.save(pretty=True)
     else:
         defs = _build_defs(dwg, renders)
