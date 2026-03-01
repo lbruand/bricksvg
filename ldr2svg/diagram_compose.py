@@ -307,7 +307,7 @@ def compose_diagram_svg(
         for group_name, group_pieces in piece_groups:
             platform_rows = sorted(
                 [piece_proj[id(p)] for p in group_pieces
-                 if p.part == "3024" and id(p) in piece_proj],
+                 if p.part in ("3024", "3070b") and id(p) in piece_proj],
                 key=lambda r: (-r[1], r[0]),
             )
             if not platform_rows:
@@ -326,7 +326,7 @@ def compose_diagram_svg(
         for group_name, group_pieces in piece_groups:
             node_rows = sorted(
                 [piece_proj[id(p)] for p in group_pieces
-                 if p.part != "3024" and id(p) in piece_proj],
+                 if p.part not in ("3024", "3070b") and id(p) in piece_proj],
                 key=lambda r: (-r[1], r[0]),
             )
             if not node_rows:

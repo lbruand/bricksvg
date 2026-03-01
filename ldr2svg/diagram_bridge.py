@@ -54,7 +54,8 @@ _PLATE_H_LDU    = 8      # height of a 1×1 plate (3024, height = 1/3 brick)
 _BRICK_H_LDU    = 24     # height of a 2×2 brick (3003, height = 1 brick)
 _TILE_LDU       = 20     # one stud = one 1×1 tile width
 _NODE_TILE_PART      = "3068b"  # 2×2 flat tile placed on top of each node brick (no studs)
-_PLATFORM_TILE_PART = "3070b"  # 1×1 flat tile used for cluster platforms (no studs)
+_PLATFORM_TILE_PART = "3024"   # 1×1 plate (with stud) for the main cluster platform
+_LABEL_TILE_PART    = "3070b"  # 1×1 flat tile (no stud) — label writing surface at platform front
 
 
 @dataclass
@@ -391,6 +392,59 @@ def _build_platform_pieces(
     return pieces, cluster_platform_tiles
 
 
+def _build_cluster_label_tiles(
+    cluster_objs: list[dict],
+    cluster_tile_extent: dict[str, TileExtent],
+    cluster_depth: dict[str, int],
+    cluster_color: dict[str, int],
+) -> tuple[list[Piece], dict[str, list[Piece]]]:
+    """Place up to three 1×1 flat (no-stud) tiles at the front-centre of each cluster.
+
+    The tiles sit on top of the cluster's 1×1 plates (one plate-height above
+    the platform surface) and provide a writing surface for the cluster label.
+
+    Returns
+    -------
+    pieces
+        All label tile pieces.
+    cluster_label_tiles
+        Maps cluster name → list of its label tile pieces.
+    """
+    pieces: list[Piece] = []
+    cluster_label_tiles: dict[str, list[Piece]] = {}
+
+    for cl in (c for c in cluster_objs if c["name"] in cluster_tile_extent):
+        name  = cl["name"]
+        ext   = cluster_tile_extent[name]
+        depth = cluster_depth[name]
+        color = cluster_color.get(name, 15)
+
+        # One plate-height above the platform surface
+        label_tile_y = float(-(depth + 1) * _PLATE_H_LDU - _PLATE_H_LDU)
+
+        # X-centres of every tile column in the platform
+        all_xs = [x + _TILE_LDU // 2 for x in range(ext.x0, ext.x1, _TILE_LDU)]
+        if not all_xs:
+            continue
+
+        # Front row: z-centre of the last row of platform tiles
+        front_z = float(ext.z1 - _TILE_LDU // 2)
+
+        # Pick up to 3 columns closest to the platform's X-centre
+        cx = (ext.x0 + ext.x1) / 2.0
+        chosen_xs = sorted(all_xs, key=lambda x: abs(x - cx))[:3]
+
+        tile_pieces: list[Piece] = []
+        for tx in chosen_xs:
+            pos = np.array([float(tx), label_tile_y, front_z])
+            tile_pieces.append(Piece(part=_LABEL_TILE_PART, color=color, pos=pos, rot=np.eye(3)))
+
+        pieces.extend(tile_pieces)
+        cluster_label_tiles[name] = tile_pieces
+
+    return pieces, cluster_label_tiles
+
+
 def _assemble_piece_groups(
     cluster_objs: list[dict],
     cluster_depth: dict[str, int],
@@ -521,6 +575,13 @@ def build_ldr_scene(
         cluster_objs, cluster_tile_extent, cluster_depth, cluster_color
     )
 
+    label_tile_pieces, cluster_label_tiles = _build_cluster_label_tiles(
+        cluster_objs, cluster_tile_extent, cluster_depth, cluster_color
+    )
+    # Merge label tiles into platform groups so they render in the platform <g>
+    for name, tiles in cluster_label_tiles.items():
+        cluster_platform_tiles.setdefault(name, []).extend(tiles)
+
     piece_groups = _assemble_piece_groups(
         cluster_objs, cluster_depth, cluster_node_bricks, cluster_platform_tiles, lone_node_bricks
     )
@@ -529,4 +590,4 @@ def build_ldr_scene(
 
     cluster_data = _build_cluster_label_data(cluster_objs, cluster_tile_extent, cluster_depth)
 
-    return node_pieces + platform_pieces, edge_positions, node_data, piece_groups, cluster_data
+    return node_pieces + platform_pieces + label_tile_pieces, edge_positions, node_data, piece_groups, cluster_data

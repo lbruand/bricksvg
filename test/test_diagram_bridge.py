@@ -16,6 +16,7 @@ from ldr2svg.diagram_bridge import (
     _TILE_LDU,
     _NODE_TILE_PART,
     _PLATFORM_TILE_PART,
+    _LABEL_TILE_PART,
     _parse_objects,
     _compute_cluster_metadata,
     _layout_positions,
@@ -24,6 +25,7 @@ from ldr2svg.diagram_bridge import (
     _displace_lone_nodes,
     _build_node_pieces,
     _build_platform_pieces,
+    _build_cluster_label_tiles,
     _build_cluster_label_data,
     _assemble_piece_groups,
     _build_edge_positions,
@@ -919,6 +921,75 @@ class TestBuildClusterLabelData:
         cluster_objs = [{"_gvid": 0, "nodes": [1], "name": "cluster_A", "label": "A"}]
         result = _build_cluster_label_data(cluster_objs, {}, {"cluster_A": 0})
         assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Step: _build_cluster_label_tiles
+# ---------------------------------------------------------------------------
+
+class TestBuildClusterLabelTiles:
+    def _inputs(self, x1=60, z1=40):
+        cluster_objs        = [{"_gvid": 0, "nodes": [1], "name": "cluster_A"}]
+        cluster_tile_extent = {"cluster_A": TileExtent(0, x1, 0, z1)}
+        cluster_depth       = {"cluster_A": 0}
+        cluster_color       = {"cluster_A": 1}
+        return cluster_objs, cluster_tile_extent, cluster_depth, cluster_color
+
+    def test_returns_pieces_and_dict(self):
+        pieces, by_cluster = _build_cluster_label_tiles(*self._inputs())
+        assert isinstance(pieces, list)
+        assert isinstance(by_cluster, dict)
+
+    def test_tiles_use_label_part(self):
+        pieces, _ = _build_cluster_label_tiles(*self._inputs())
+        assert all(p.part == _LABEL_TILE_PART for p in pieces)
+
+    def test_at_most_three_tiles_per_cluster(self):
+        # Wide extent (8 columns) → capped at 3
+        pieces, _ = _build_cluster_label_tiles(*self._inputs(x1=160, z1=40))
+        assert len(pieces) <= 3
+
+    def test_narrow_cluster_gets_one_tile(self):
+        # Extent (0,20) → one column → one tile
+        pieces, _ = _build_cluster_label_tiles(*self._inputs(x1=20, z1=20))
+        assert len(pieces) == 1
+
+    def test_three_column_cluster_gets_three_tiles(self):
+        # Extent (0,60) → three columns → three tiles
+        pieces, _ = _build_cluster_label_tiles(*self._inputs(x1=60, z1=40))
+        assert len(pieces) == 3
+
+    def test_tiles_at_front_z(self):
+        # front_z = ext.z1 - _TILE_LDU // 2 = 40 - 10 = 30
+        pieces, _ = _build_cluster_label_tiles(*self._inputs(x1=60, z1=40))
+        for p in pieces:
+            assert p.pos[2] == pytest.approx(40 - _TILE_LDU // 2)
+
+    def test_tiles_y_one_plate_above_platform(self):
+        # depth=0 → platform_y = -8; label tile y = -8 - 8 = -16
+        pieces, _ = _build_cluster_label_tiles(*self._inputs())
+        for p in pieces:
+            assert p.pos[1] == pytest.approx(-2 * _PLATE_H_LDU)
+
+    def test_tiles_centred_on_platform(self):
+        # Extent (0,60) → columns at 10,30,50; centre=30; all 3 chosen
+        pieces, _ = _build_cluster_label_tiles(*self._inputs(x1=60, z1=40))
+        xs = sorted(p.pos[0] for p in pieces)
+        assert xs == pytest.approx([10.0, 30.0, 50.0])
+
+    def test_cluster_missing_from_extent_skipped(self):
+        cluster_objs = [{"_gvid": 0, "nodes": [1], "name": "cluster_A"}]
+        pieces, by_cluster = _build_cluster_label_tiles(cluster_objs, {}, {"cluster_A": 0}, {})
+        assert pieces == []
+        assert by_cluster == {}
+
+    def test_by_cluster_keyed_by_name(self):
+        _, by_cluster = _build_cluster_label_tiles(*self._inputs())
+        assert "cluster_A" in by_cluster
+
+    def test_tiles_use_cluster_color(self):
+        pieces, _ = _build_cluster_label_tiles(*self._inputs())
+        assert all(p.color == 1 for p in pieces)
 
 
 # ---------------------------------------------------------------------------
