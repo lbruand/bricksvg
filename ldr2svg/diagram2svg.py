@@ -1,7 +1,6 @@
 """diagram2svg — CLI entry point: render a diagrams-library script as an isometric brick SVG."""
 
 import argparse
-import sys
 from pathlib import Path
 
 from .diagram_bridge import extract_graph
