@@ -29,6 +29,8 @@ def main() -> None:
         "--keep-pngs", action="store_true",
         help="Keep per-piece PNG files in the temp directory",
     )
+    parser.add_argument("-j", "--workers", type=int, default=None,
+                        help="Parallel render workers (default: cpu count)")
     args = parser.parse_args()
 
     input_path  = Path(args.input).resolve()
@@ -44,7 +46,7 @@ def main() -> None:
 
     tmpdir = Path(tempfile.mkdtemp(prefix="diagram2svg_"))
     print(f"Rendering pieces (tmpdir: {tmpdir}) …")
-    renders = build_pngs(pieces, tmpdir, keep_pngs=args.keep_pngs)
+    renders = build_pngs(pieces, tmpdir, keep_pngs=args.keep_pngs, workers=args.workers)
 
     if not renders:
         print("No pieces rendered — nothing to compose.", file=sys.stderr)
