@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from ldr2svg.diagram_bridge import extract_graph, build_ldr_scene
 from ldr2svg.diagram_compose import compose_diagram_svg
-from ldr2svg.ldr2png_svg import build_pngs, build_pngs_white
+from ldr2svg.ldr2png_svg import build_pngs, build_pngs_white, colorize_renders
 
 
 def main() -> None:
@@ -34,9 +34,16 @@ def main() -> None:
     parser.add_argument(
         "--masked", action="store_true",
         help=(
-            "Render each part once in white and colourise at SVG composition "
-            "time via an alpha mask + mix-blend-mode:multiply.  "
-            "Fewer OpenSCAD renders when many colours are used."
+            "Render each part once in white; colourise at SVG composition time "
+            "via alpha mask + mix-blend-mode:multiply (browser/Inkscape only)."
+        ),
+    )
+    parser.add_argument(
+        "--precolor", action="store_true",
+        help=(
+            "Render each part once in white; colourise with PIL before writing "
+            "the SVG.  Fewer OpenSCAD renders, works in all viewers including "
+            "LibreOffice."
         ),
     )
     args = parser.parse_args()
@@ -53,10 +60,15 @@ def main() -> None:
     print(f"  {len(pieces)} pieces, {len(arrows)} edges, {len(node_data)} nodes, {len(cluster_data)} clusters")
 
     tmpdir = Path(tempfile.mkdtemp(prefix="diagram2svg_"))
-    if args.masked:
+    if args.masked or args.precolor:
         print(f"White-rendering pieces (tmpdir: {tmpdir}) …")
-        renders = build_pngs_white(pieces, tmpdir,
-                                   keep_pngs=args.keep_pngs, workers=args.workers)
+        white_renders = build_pngs_white(pieces, tmpdir,
+                                         keep_pngs=args.keep_pngs, workers=args.workers)
+        if args.precolor:
+            print("Colorising renders with PIL …")
+            renders = colorize_renders(white_renders)
+        else:
+            renders = white_renders
     else:
         print(f"Rendering pieces (tmpdir: {tmpdir}) …")
         renders = build_pngs(pieces, tmpdir,
@@ -68,7 +80,7 @@ def main() -> None:
 
     compose_diagram_svg(renders, output_path, arrows, node_data,
                         piece_groups=piece_groups, cluster_data=cluster_data,
-                        masked=args.masked)
+                        masked=(args.masked and not args.precolor))
 
     if not args.keep_pngs:
         try:

@@ -8,7 +8,7 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageChops
 
 from .parts import Piece, PART_MAP, ldraw_rgb, parse_ldr
 from .scad import make_scad, render_piece, remove_and_crop
@@ -152,6 +152,46 @@ def build_pngs_white(
         for label in unique_labels
         if (r := results.get(label)) is not None
     }
+
+
+def _colorize(white_img: Image.Image, color_id: int) -> Image.Image:
+    """Return a copy of *white_img* tinted to LDraw *color_id*.
+
+    Uses PIL ``ImageChops.multiply`` — identical maths to SVG
+    ``mix-blend-mode: multiply``:  result = src × color / 255.
+    Lit pixels (white) become the target colour; shadow pixels darken it
+    proportionally.  The alpha channel is preserved unchanged.
+    """
+    r, g, b = ldraw_rgb(color_id)
+    solid = Image.new("RGB", white_img.size, (r, g, b))
+    colored_rgb = ImageChops.multiply(white_img.convert("RGB"), solid)
+    colored_rgb.putalpha(white_img.split()[3])   # restore original alpha
+    return colored_rgb.convert("RGBA")
+
+
+def colorize_renders(
+    white_renders: dict[str, tuple[Image.Image, float, float, list[Piece]]],
+) -> dict[str, tuple[Image.Image, float, float, list[Piece]]]:
+    """Produce per-(part, rotation, color) renders by PIL-multiplying white renders.
+
+    Takes the output of :func:`build_pngs_white` and returns a renders dict
+    with the same structure as :func:`build_pngs` — i.e. compatible with the
+    standard (non-masked) SVG composition path.
+
+    Only one OpenSCAD render is needed per unique (part, rotation); colorisation
+    is done in Python in microseconds per variant and works in all SVG viewers
+    (no CSS blend modes required).
+    """
+    result: dict[str, tuple[Image.Image, float, float, list[Piece]]] = {}
+    for _nc_label, (white_img, ax, ay, pieces) in white_renders.items():
+        by_color: dict[int, list[Piece]] = {}
+        for p in pieces:
+            by_color.setdefault(p.color, []).append(p)
+        for color_id, color_pieces in by_color.items():
+            colored_img = _colorize(white_img, color_id)
+            label = _piece_label(color_pieces[0])
+            result[label] = (colored_img, ax, ay, color_pieces)
+    return result
 
 
 def main() -> None:
