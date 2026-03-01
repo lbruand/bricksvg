@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from ldr2svg.diagram_bridge import extract_graph, build_ldr_scene
 from ldr2svg.diagram_compose import compose_diagram_svg
-from ldr2svg.ldr2png_svg import build_pngs
+from ldr2svg.ldr2png_svg import build_pngs, build_pngs_white
 
 
 def main() -> None:
@@ -31,6 +31,14 @@ def main() -> None:
     )
     parser.add_argument("-j", "--workers", type=int, default=None,
                         help="Parallel render workers (default: cpu count)")
+    parser.add_argument(
+        "--masked", action="store_true",
+        help=(
+            "Render each part once in white and colourise at SVG composition "
+            "time via an alpha mask + mix-blend-mode:multiply.  "
+            "Fewer OpenSCAD renders when many colours are used."
+        ),
+    )
     args = parser.parse_args()
 
     input_path  = Path(args.input).resolve()
@@ -45,15 +53,22 @@ def main() -> None:
     print(f"  {len(pieces)} pieces, {len(arrows)} edges, {len(node_data)} nodes, {len(cluster_data)} clusters")
 
     tmpdir = Path(tempfile.mkdtemp(prefix="diagram2svg_"))
-    print(f"Rendering pieces (tmpdir: {tmpdir}) …")
-    renders = build_pngs(pieces, tmpdir, keep_pngs=args.keep_pngs, workers=args.workers)
+    if args.masked:
+        print(f"White-rendering pieces (tmpdir: {tmpdir}) …")
+        renders = build_pngs_white(pieces, tmpdir,
+                                   keep_pngs=args.keep_pngs, workers=args.workers)
+    else:
+        print(f"Rendering pieces (tmpdir: {tmpdir}) …")
+        renders = build_pngs(pieces, tmpdir,
+                             keep_pngs=args.keep_pngs, workers=args.workers)
 
     if not renders:
         print("No pieces rendered — nothing to compose.", file=sys.stderr)
         return
 
     compose_diagram_svg(renders, output_path, arrows, node_data,
-                        piece_groups=piece_groups, cluster_data=cluster_data)
+                        piece_groups=piece_groups, cluster_data=cluster_data,
+                        masked=args.masked)
 
     if not args.keep_pngs:
         try:

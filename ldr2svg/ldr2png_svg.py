@@ -12,7 +12,7 @@ from PIL import Image
 
 from .parts import Piece, PART_MAP, ldraw_rgb, parse_ldr
 from .scad import make_scad, render_piece, remove_and_crop
-from .compose import compose_svg, _piece_label
+from .compose import compose_svg, _piece_label, _piece_label_no_color
 
 
 def _render_one(
@@ -73,6 +73,73 @@ def build_pngs(
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_label = {
             executor.submit(_render_one, label_idx, piece, n_unique, tmpdir, keep_pngs): label
+            for label_idx, (label, (_, piece)) in enumerate(by_label.items())
+        }
+        results: dict[str, tuple[Image.Image, float, float] | None] = {
+            future_to_label[f]: f.result()
+            for f in as_completed(future_to_label)
+        }
+
+    return {
+        label: (*r, pieces_by_label[label])
+        for label in unique_labels
+        if (r := results.get(label)) is not None
+    }
+
+
+def build_pngs_white(
+    pieces: list[Piece],
+    tmpdir: Path,
+    keep_pngs: bool = False,
+    workers: int | None = None,
+) -> dict[str, tuple[Image.Image, float, float, list[Piece]]]:
+    """Render each unique (part, rotation) **once in white** (LDraw color 15).
+
+    Deduplicates by part + rotation only — ignoring color.  All pieces that
+    share the same part+rotation are grouped under the same label regardless
+    of their actual colour.  The white render is later colourised at SVG
+    composition time via an alpha mask + ``mix-blend-mode: multiply``.
+
+    Returns the same structure as :func:`build_pngs`:
+    ``label → (img, ax, ay, pieces)`` where *pieces* lists every scene piece
+    with that part+rotation (potentially spanning multiple colours).
+    """
+    _WHITE = 15     # LDraw white
+
+    known = [(i, p) for i, p in enumerate(pieces) if PART_MAP.get(p.part) is not None]
+    unique_labels = list(dict.fromkeys(_piece_label_no_color(p) for _, p in known))
+    n_unique = len(unique_labels)
+
+    by_label: dict[str, tuple[int, Piece]] = {}
+    for i, p in known:
+        lbl = _piece_label_no_color(p)
+        if lbl not in by_label:
+            by_label[lbl] = (i, p)
+
+    pieces_by_label: dict[str, list[Piece]] = {lbl: [] for lbl in unique_labels}
+    for _, p in known:
+        pieces_by_label[_piece_label_no_color(p)].append(p)
+
+    def _render_white(
+        label_idx: int, piece: Piece
+    ) -> tuple[Image.Image, float, float] | None:
+        part = PART_MAP[piece.part]
+        scad_src = make_scad(part, (255, 255, 255), piece.rot)
+        png_path = tmpdir / f"white_{label_idx:03d}_{piece.part}.png"
+        ok = render_piece(scad_src, png_path)
+        if ok:
+            img, ax, ay = remove_and_crop(png_path)
+            print(f"  [{label_idx+1}/{n_unique}] White-render {piece.part} … ok")
+            if not keep_pngs:
+                png_path.unlink(missing_ok=True)
+            return img, ax, ay
+        print(f"  [{label_idx+1}/{n_unique}] White-render {piece.part} … FAILED — skipping")
+        return None
+
+    max_workers = workers or os.cpu_count()
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_label = {
+            executor.submit(_render_white, label_idx, piece): label
             for label_idx, (label, (_, piece)) in enumerate(by_label.items())
         }
         results: dict[str, tuple[Image.Image, float, float] | None] = {

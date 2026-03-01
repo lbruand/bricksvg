@@ -5,10 +5,16 @@ import re
 import base64
 import hashlib
 from pathlib import Path
+from typing import Callable
 
 import svgwrite
+import svgwrite.container
 import svgwrite.image
 from PIL import Image
+
+# svgwrite has no built-in Mask element; reuse Group with the right tag name.
+class _SvgMask(svgwrite.container.Group):
+    elementname = "mask"
 
 from .parts import Piece
 from .projection import project_ldraw, PX_PER_MM
@@ -26,23 +32,41 @@ def _piece_label(piece: Piece) -> str:
     return f"{piece.part} color={piece.color} rot={rows}"
 
 
+def _piece_label_no_color(piece: Piece) -> str:
+    """Cache-key excluding color — for masked/white rendering (one render per part+rotation)."""
+    def fmt_val(v: float) -> str:
+        return f"{round(v)}" if abs(v - round(v)) < 1e-6 else f"{v:.3f}"
+    rows = "[" + ",".join(
+        "[" + ",".join(fmt_val(v) for v in row) + "]"
+        for row in piece.rot
+    ) + "]"
+    return f"{piece.part} rot={rows}"
+
+
 def _project_piece(
-    piece: Piece, iw: int, ih: int, anchor_x: float, anchor_y: float,
+    piece: Piece,
+    iw: int,
+    ih: int,
+    anchor_x: float,
+    anchor_y: float,
+    label_fn: Callable[[Piece], str] = _piece_label,
 ) -> tuple[float, float, float, float, float, float, int, int, str]:
     """Project one piece to a screen-space row: (depth, ldy, sx_px, sy_px, ax, ay, iw, ih, label)."""
     sx, sy, depth = project_ldraw(piece.pos)
     return (depth, float(piece.pos[1]), sx * PX_PER_MM, sy * PX_PER_MM,
-            anchor_x, anchor_y, iw, ih, _piece_label(piece))
+            anchor_x, anchor_y, iw, ih, label_fn(piece))
 
 
 def _project_pieces(
     pngs: list[tuple[Piece, int, int, float, float]],
+    label_fn: Callable[[Piece], str] = _piece_label,
 ) -> list[tuple[float, float, float, float, int, int, str]]:
     """Project each piece to screen coords and sort back-to-front.
 
     Returns (sx_px, sy_px, ax, ay, iw, ih, label) per piece.
     """
-    rows = sorted([_project_piece(*t) for t in pngs], key=lambda t: (-t[1], t[0]))
+    rows = sorted([_project_piece(*t, label_fn=label_fn) for t in pngs],
+                  key=lambda t: (-t[1], t[0]))
     return [(sx, sy, ax, ay, iw, ih, label)
             for _, _, sx, sy, ax, ay, iw, ih, label in rows]
 
@@ -92,6 +116,64 @@ def _build_defs(
     for _, (_, _, _, dwg_image) in defs.items():
         dwg.defs.add(dwg_image)
     return {k: (def_id, ax, ay) for k, (def_id, ax, ay, _) in defs.items()}
+
+
+def _build_defs_masked(
+    dwg: svgwrite.Drawing,
+    renders: dict[str, tuple[Image.Image, float, float, list]],
+) -> dict[str, tuple[str, str, float, float, int, int]]:
+    """For masked rendering: add shadow images + alpha masks to <defs>.
+
+    Each unique white render gets:
+    - An ``<image id="shadow-{sha}">`` element (the white render itself)
+    - A ``<mask id="alpha-{sha}">`` element whose content is the alpha channel
+      of the white render encoded as a greyscale PNG.
+
+    In the SVG, each piece instance is composed as::
+
+        <g style="isolation: isolate" transform="translate(x, y)">
+          <rect … fill="#color" mask="url(#alpha-{sha})"/>
+          <use href="#shadow-{sha}" style="mix-blend-mode: multiply"/>
+        </g>
+
+    The rect supplies the target colour; the white render (with multiply
+    blend) darkens the colour where shadow pixels appear, leaving highlight
+    pixels unchanged.
+
+    Returns label → (shadow_id, mask_id, ax, ay, iw, ih).
+    """
+    result = {}
+    for label, (img, ax, ay, _pieces) in renders.items():
+        iw, ih = img.size
+        sha = hashlib.sha256(label.encode()).hexdigest()[:8]
+
+        # Shadow image (white render) — referenced by <use> with multiply blend
+        shadow_id = f"shadow-{sha}"
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        uri = f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode()}"
+        shadow_img = dwg.image(uri, insert=("0", "0"),
+                               size=(str(iw), str(ih)), id=shadow_id)
+        dwg.defs.add(shadow_img)
+
+        # Alpha mask — greyscale PNG of the alpha channel; white = opaque
+        mask_id = f"alpha-{sha}"
+        alpha_ch = img.split()[3]          # PIL Image, mode='L'
+        alpha_buf = io.BytesIO()
+        alpha_ch.save(alpha_buf, format="PNG")
+        alpha_uri = f"data:image/png;base64,{base64.b64encode(alpha_buf.getvalue()).decode()}"
+        mask_el = _SvgMask(id=mask_id)
+        mask_el["maskContentUnits"] = "userSpaceOnUse"
+        mask_el["maskUnits"] = "userSpaceOnUse"
+        mask_el["x"] = "0"
+        mask_el["y"] = "0"
+        mask_el["width"] = str(iw)
+        mask_el["height"] = str(ih)
+        mask_el.add(dwg.image(alpha_uri, insert=("0", "0"), size=(str(iw), str(ih))))
+        dwg.defs.add(mask_el)
+
+        result[label] = (shadow_id, mask_id, ax, ay, iw, ih)
+    return result
 
 
 def _inject_def_comments(output: str, defs: dict[str, tuple]) -> None:
