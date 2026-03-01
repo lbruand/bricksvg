@@ -213,13 +213,13 @@ def _draw_cluster_labels(
         text_el = dwg.text(
             nd["label"],
             insert=(0, 0),
-            font_size="14",
+            font_size="40",
             font_weight="bold",
             fill="#444",
             text_anchor="middle",
         )
         text_el.attribs["transform"] = (
-            f"translate({lx:.1f},{ly:.1f}) rotate(30) scale(1,0.5)"
+            f"translate({lx:.1f},{ly:.1f}) rotate(30) skewX(30) scale(1,0.86603)"
         )
         grp.add(text_el)
     dwg.add(grp)
