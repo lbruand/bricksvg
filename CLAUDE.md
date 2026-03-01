@@ -109,6 +109,51 @@ compose_diagram_svg(renders, …) → SVG file
 
 ---
 
+## Isometric SVG text / object transforms
+
+Reference: <https://jeroenhoek.nl/articles/svg-and-isometric-projection.html>
+
+SVG `matrix(A, B, C, D, E, F)` maps a 2-D source point `(x, y)` to screen `(Ax+Cy+E, Bx+Dy+F)`.
+Column 1 `(A, B)` is where the source **X axis** lands on screen;
+column 2 `(C, D)` is where the source **Y axis** lands.
+`(E, F)` is the translation (position of the origin on the canvas).
+
+The three canonical face matrices for a **standard isometric** projection
+(30° grid angle, camera along `(1,1,1)/√3`) are derived as:
+`M = M_rotate(30° CCW) × M_shear_x(−tan 30°) × M_scale_y(cos 30°)`
+
+| Face | SVG `matrix(A, B, C, D, …)` | Derivation |
+|------|-----------------------------|------------|
+| **Top** | `matrix(0.866025, 0.5, -0.866025, 0.5, tx, ty)` | scale Y×cos30 → shearX(−tan30) → rotate CCW 30° |
+| **Left** | `matrix(0.866025, 0.5, 0, 1, tx, ty)` | scale X×cos30 → skewY(+30°) |
+| **Right** | `matrix(0.866025, -0.5, 0, 1, tx, ty)` | scale X×cos30 → skewY(−30°) |
+
+### What each column means
+
+**Top face** `matrix(0.866, 0.5, -0.866, 0.5)`:
+- Source X → screen `(+0.866, +0.5)` — goes **right-and-down at 30°** (LDraw +X axis)
+- Source Y → screen `(-0.866, +0.5)` — goes **left-and-down at 30°** (LDraw +Z axis, toward viewer)
+- Character ascenders lean into the surface → text looks flat on a horizontal tile ✓
+
+**Left face** `matrix(0.866, 0.5, 0, 1)`:
+- Source X → `(+0.866, +0.5)` — right-and-down at 30°
+- Source Y → `(0, +1)` — straight down (the vertical face height)
+- Use for text/content on the left-facing vertical wall
+
+**Right face** `matrix(0.866, -0.5, 0, 1)`:
+- Source X → `(+0.866, -0.5)` — right-and-up at 30°
+- Source Y → `(0, +1)` — straight down
+- Use for text/content on the right-facing vertical wall
+
+### Screen-Y centering note (top face)
+
+Because `B + D = 1.0` for the top-face matrix, adding `δ` to the `F` component
+produces a **pure screen-Y shift of δ px** (zero screen-X drift).
+Use this to compensate for glyph-ascent and the tile front-face offset so labels
+appear centred on the visible tile piece.
+
+---
+
 ## Testing
 
 ```bash
