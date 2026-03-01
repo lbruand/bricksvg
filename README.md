@@ -53,3 +53,13 @@ Slow integration tests (require OpenSCAD; use `xvfb-run` on headless systems):
 ```bash
 xvfb-run uv run pytest test/ -v
 ```
+
+## Credits and licences
+
+- **`ldr2svg/brick.scad`** — derived from [Thingiverse thing:5699](http://www.thingiverse.com/thing:5699),
+  © 2015 Christopher Finke, MIT licence.
+  LEGO, the LEGO logo, the Brick, DUPLO, and MINDSTORMS are trademarks of the LEGO Group.
+
+- **LDraw** — part geometry and colour definitions follow the
+  [LDraw](https://www.ldraw.org/) open standard for LEGO CAD programs.
+  LDraw™ is a trademark of the Estate of James Jessiman.
