@@ -15,6 +15,7 @@ from ldr2svg.diagram_compose import (
     _draw_floor_arrows,
     _draw_icons,
     _draw_labels,
+    _draw_cluster_labels,
     compose_diagram_svg,
 )
 from ldr2svg.parts import Piece
@@ -320,6 +321,62 @@ class TestDrawLabels:
         root = self._run(tmp_path, [])
         grp = root.find(f".//{{{NS}}}g[@id='labels']")
         assert grp is not None
+
+
+# ---------------------------------------------------------------------------
+# _draw_cluster_labels
+# ---------------------------------------------------------------------------
+
+class TestDrawClusterLabels:
+    def _cluster_data(self, label="Cluster A"):
+        return [{"pos": np.array([0.0, -8.0, 40.0]), "label": label}]
+
+    def _run(self, tmp_path, cluster_data, name="clabels.svg"):
+        dwg = _make_dwg(tmp_path, name)
+        _draw_cluster_labels(dwg, cluster_data, _identity, _identity)
+        dwg.save()
+        return _parse_svg(tmp_path / name)
+
+    def _texts(self, root):
+        return root.findall(f".//{{{NS}}}text")
+
+    def test_nonempty_label_produces_text(self, tmp_path):
+        root = self._run(tmp_path, self._cluster_data())
+        assert len(self._texts(root)) == 1
+
+    def test_empty_label_skipped(self, tmp_path):
+        root = self._run(tmp_path, self._cluster_data(label=""), name="empty.svg")
+        assert len(self._texts(root)) == 0
+
+    def test_text_content_matches_label(self, tmp_path):
+        root = self._run(tmp_path, self._cluster_data("MyCluster"))
+        assert self._texts(root)[0].text == "MyCluster"
+
+    def test_text_has_matrix_transform(self, tmp_path):
+        root = self._run(tmp_path, self._cluster_data())
+        transform = self._texts(root)[0].attrib.get("transform", "")
+        assert transform.startswith("matrix(")
+
+    def test_matrix_encodes_isometric_axes(self, tmp_path):
+        """The matrix must use the standard isometric top-face coefficients."""
+        root = self._run(tmp_path, self._cluster_data())
+        transform = self._texts(root)[0].attrib.get("transform", "")
+        assert "0.866025" in transform
+        assert "0.5" in transform
+        assert "-0.866025" in transform
+
+    def test_cluster_labels_group_present(self, tmp_path):
+        root = self._run(tmp_path, [])
+        grp = root.find(f".//{{{NS}}}g[@id='cluster_labels']")
+        assert grp is not None
+
+    def test_multiple_clusters(self, tmp_path):
+        cluster_data = [
+            {"pos": np.array([  0.0, -8.0,  40.0]), "label": "A"},
+            {"pos": np.array([200.0, -8.0, 140.0]), "label": "B"},
+        ]
+        root = self._run(tmp_path, cluster_data, name="multi.svg")
+        assert len(self._texts(root)) == 2
 
 
 # ---------------------------------------------------------------------------

@@ -6,8 +6,9 @@ from pathlib import Path
 from unittest.mock import patch
 from PIL import Image
 
-from ldr2svg.parts import parse_ldr, PART_MAP, Piece
-from ldr2svg.ldr2png_svg import _render_one_white, build_pngs_white
+from ldr2svg.parts import parse_ldr, PART_MAP, Piece, ldraw_rgb
+from ldr2svg.ldr2png_svg import _render_one_white, build_pngs_white, _colorize, colorize_renders
+from ldr2svg.compose import _piece_label, _piece_label_no_color
 
 LDR_PATH = Path(__file__).parent.parent / "test.ldr"
 
@@ -126,3 +127,80 @@ class TestBuildPngsWhite:
              patch("ldr2svg.ldr2png_svg.remove_and_crop", side_effect=_fake_remove_and_crop):
             build_pngs_white(pieces, tmp_path, keep_pngs=True)
         assert len(list(tmp_path.glob("*.png"))) == 1
+
+
+class TestColorize:
+    def _white_img(self, size=(20, 20)):
+        return Image.new("RGBA", size, (255, 255, 255, 255))
+
+    def _black_img(self, size=(20, 20)):
+        return Image.new("RGBA", size, (0, 0, 0, 255))
+
+    def test_returns_rgba_image(self):
+        result = _colorize(self._white_img(), color_id=15)  # white
+        assert result.mode == "RGBA"
+
+    def test_same_size_as_input(self):
+        result = _colorize(self._white_img((30, 40)), color_id=1)
+        assert result.size == (30, 40)
+
+    def test_white_pixels_become_target_color(self):
+        color_id = 4  # red in LDraw
+        r, g, b = ldraw_rgb(color_id)
+        result = _colorize(self._white_img(), color_id=color_id)
+        pixel = result.getpixel((0, 0))
+        assert pixel[0] == pytest.approx(r, abs=1)
+        assert pixel[1] == pytest.approx(g, abs=1)
+        assert pixel[2] == pytest.approx(b, abs=1)
+
+    def test_black_pixels_stay_black(self):
+        result = _colorize(self._black_img(), color_id=4)
+        pixel = result.getpixel((0, 0))
+        assert pixel[0] == 0
+        assert pixel[1] == 0
+        assert pixel[2] == 0
+
+    def test_alpha_preserved(self):
+        img = Image.new("RGBA", (10, 10), (255, 255, 255, 128))
+        result = _colorize(img, color_id=4)
+        assert result.getpixel((0, 0))[3] == 128
+
+
+class TestColorizeRenders:
+    def _white_renders(self):
+        """Two parts, each with two colors."""
+        p1a = Piece(part="3003", color=1, pos=np.zeros(3), rot=np.eye(3))
+        p1b = Piece(part="3003", color=4, pos=np.zeros(3), rot=np.eye(3))
+        p2a = Piece(part="3666", color=1, pos=np.zeros(3), rot=np.eye(3))
+        img = Image.new("RGBA", (100, 80), (255, 255, 255, 255))
+        return {
+            _piece_label_no_color(p1a): (img, 50.0, 40.0, [p1a, p1b]),
+            _piece_label_no_color(p2a): (img, 30.0, 20.0, [p2a]),
+        }
+
+    def test_one_entry_per_color_variant(self):
+        result = colorize_renders(self._white_renders())
+        # 3003 has 2 colors → 2 entries; 3666 has 1 color → 1 entry
+        assert len(result) == 3
+
+    def test_keys_include_color(self):
+        result = colorize_renders(self._white_renders())
+        assert all("color=" in label for label in result)
+
+    def test_output_images_are_rgba(self):
+        result = colorize_renders(self._white_renders())
+        for img, *_ in result.values():
+            assert img.mode == "RGBA"
+
+    def test_anchors_preserved(self):
+        result = colorize_renders(self._white_renders())
+        for label, (_, ax, ay, _pieces) in result.items():
+            if "3003" in label:
+                assert ax == pytest.approx(50.0)
+                assert ay == pytest.approx(40.0)
+
+    def test_pieces_grouped_by_color(self):
+        result = colorize_renders(self._white_renders())
+        for _, (_, _, _, pieces) in result.items():
+            colors = {p.color for p in pieces}
+            assert len(colors) == 1  # each entry has exactly one color

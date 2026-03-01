@@ -9,9 +9,11 @@ from PIL import Image
 from ldr2svg.parts import parse_ldr, PART_MAP, Piece
 from ldr2svg.projection import project_ldraw
 from ldr2svg.compose import (
-    _piece_label, _project_piece, _project_pieces,
-    _canvas_bounds, _build_defs, _inject_def_comments,
-    _make_dwg_image, compose_svg,
+    _piece_label, _piece_label_no_color,
+    _fmt_rot_rows, _hash_label, _img_to_data_uri,
+    _project_piece, _project_pieces,
+    _canvas_bounds, _build_defs, _build_defs_masked,
+    _inject_def_comments, _make_dwg_image, compose_svg,
 )
 
 LDR_PATH = Path(__file__).parent.parent / "test.ldr"
@@ -185,6 +187,153 @@ class TestComposeSvg:
         out = str(tmp_path / "out.svg")
         compose_svg(_make_renders(), out)
         assert "<!--" in Path(out).read_text()
+
+
+class TestFmtRotRows:
+    def test_identity_format(self):
+        piece = Piece(part="3003", color=1, pos=np.zeros(3), rot=np.eye(3))
+        assert _fmt_rot_rows(piece) == "[[1,0,0],[0,1,0],[0,0,1]]"
+
+    def test_non_integer_formatted_to_three_decimals(self):
+        piece = Piece(part="3003", color=1, pos=np.zeros(3),
+                      rot=np.array([[0.5, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]))
+        result = _fmt_rot_rows(piece)
+        assert "0.500" in result
+
+    def test_integer_values_not_formatted_as_float(self):
+        piece = Piece(part="3003", color=1, pos=np.zeros(3), rot=np.eye(3))
+        assert "." not in _fmt_rot_rows(piece)
+
+
+class TestHashLabel:
+    def test_returns_eight_char_hex(self):
+        h = _hash_label("3003 color=1 rot=[[1,0,0]]")
+        assert len(h) == 8
+        assert all(c in "0123456789abcdef" for c in h)
+
+    def test_same_input_same_output(self):
+        assert _hash_label("abc") == _hash_label("abc")
+
+    def test_different_inputs_different_outputs(self):
+        assert _hash_label("abc") != _hash_label("xyz")
+
+
+class TestImgToDataUri:
+    def test_starts_with_data_uri_prefix(self):
+        img = Image.new("RGBA", (10, 10))
+        uri = _img_to_data_uri(img)
+        assert uri.startswith("data:image/png;base64,")
+
+    def test_decodable_back_to_image(self):
+        import base64, io
+        img = Image.new("RGBA", (10, 10), (128, 64, 32, 255))
+        uri = _img_to_data_uri(img)
+        b64 = uri[len("data:image/png;base64,"):]
+        decoded = Image.open(io.BytesIO(base64.b64decode(b64)))
+        assert decoded.size == (10, 10)
+
+    def test_different_images_produce_different_uris(self):
+        a = Image.new("RGBA", (10, 10), (255, 0, 0, 255))
+        b = Image.new("RGBA", (10, 10), (0, 0, 255, 255))
+        assert _img_to_data_uri(a) != _img_to_data_uri(b)
+
+
+class TestPieceLabelNoColor:
+    def _piece(self, color=1):
+        return Piece(part="3666", color=color, pos=np.zeros(3), rot=np.eye(3))
+
+    def test_contains_part(self):
+        assert "3666" in _piece_label_no_color(self._piece())
+
+    def test_does_not_contain_color(self):
+        assert "color=" not in _piece_label_no_color(self._piece())
+
+    def test_same_for_different_colors(self):
+        assert _piece_label_no_color(self._piece(1)) == _piece_label_no_color(self._piece(4))
+
+    def test_differs_from_piece_label(self):
+        p = self._piece()
+        assert _piece_label(p) != _piece_label_no_color(p)
+
+
+class TestBuildDefsMasked:
+    def _make_white_renders(self):
+        pieces = [
+            Piece(part="3003", color=1, pos=np.zeros(3), rot=np.eye(3)),
+            Piece(part="3666", color=4, pos=np.zeros(3), rot=np.eye(3)),
+        ]
+        return {
+            _piece_label_no_color(p): (Image.new("RGBA", (100, 80)), 50.0, 40.0, [p])
+            for p in pieces
+        }
+
+    def test_one_entry_per_label(self, tmp_path):
+        dwg = svgwrite.Drawing(str(tmp_path / "t.svg"))
+        renders = self._make_white_renders()
+        result = _build_defs_masked(dwg, renders)
+        assert len(result) == len(renders)
+
+    def test_shadow_id_prefix(self, tmp_path):
+        dwg = svgwrite.Drawing(str(tmp_path / "t.svg"))
+        result = _build_defs_masked(dwg, self._make_white_renders())
+        for shadow_id, *_ in result.values():
+            assert shadow_id.startswith("shadow-")
+
+    def test_mask_id_prefix(self, tmp_path):
+        dwg = svgwrite.Drawing(str(tmp_path / "t.svg"))
+        result = _build_defs_masked(dwg, self._make_white_renders())
+        for _, mask_id, *_ in result.values():
+            assert mask_id.startswith("alpha-")
+
+    def test_tuple_length(self, tmp_path):
+        dwg = svgwrite.Drawing(str(tmp_path / "t.svg"))
+        result = _build_defs_masked(dwg, self._make_white_renders())
+        for entry in result.values():
+            assert len(entry) == 6  # shadow_id, mask_id, ax, ay, iw, ih
+
+    def test_image_size_stored(self, tmp_path):
+        dwg = svgwrite.Drawing(str(tmp_path / "t.svg"))
+        result = _build_defs_masked(dwg, self._make_white_renders())
+        for _, _, _, _, iw, ih in result.values():
+            assert iw == 100
+            assert ih == 80
+
+
+def _make_white_renders():
+    """White renders: keyed by _piece_label_no_color (as build_pngs_white produces)."""
+    pieces = [p for p in parse_ldr(LDR_PATH) if p.part in PART_MAP]
+    return {
+        label: (Image.new("RGBA", (100, 80)), 50.0, 40.0,
+                [p for p in pieces if _piece_label_no_color(p) == label])
+        for label in dict.fromkeys(_piece_label_no_color(p) for p in pieces)
+    }
+
+
+class TestComposeSvgMasked:
+    def test_creates_svg_file(self, tmp_path):
+        out = str(tmp_path / "masked.svg")
+        compose_svg(_make_white_renders(), out, masked=True)
+        assert Path(out).exists()
+
+    def test_svg_has_mask_elements(self, tmp_path):
+        out = str(tmp_path / "masked.svg")
+        compose_svg(_make_white_renders(), out, masked=True)
+        assert "<mask" in Path(out).read_text()
+
+    def test_svg_has_rect_elements(self, tmp_path):
+        """Masked mode uses <rect fill=color> instead of <use>."""
+        out = str(tmp_path / "masked.svg")
+        compose_svg(_make_white_renders(), out, masked=True)
+        assert "<rect" in Path(out).read_text()
+
+    def test_svg_dimensions_positive(self, tmp_path):
+        import xml.etree.ElementTree as ET
+        out = str(tmp_path / "masked.svg")
+        compose_svg(_make_white_renders(), out, masked=True)
+        root = ET.parse(out).getroot()
+        w = int(root.attrib["width"].replace("px", ""))
+        h = int(root.attrib["height"].replace("px", ""))
+        assert w > 0 and h > 0
 
 
 class TestZOrderSort:
