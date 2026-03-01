@@ -15,7 +15,9 @@ dependencies = [
 ]
 
 [project.scripts]
-ldr2svg = "ldr2svg.ldr2png_svg:main"
+ldr2svg    = "ldr2svg.ldr2png_svg:main"
+diagram2svg = "ldr2svg.diagram2svg:main"
+mermaid2svg = "ldr2svg.mermaid2svg:main"
 
 [tool.uv]
 package = true

@@ -17,11 +17,11 @@ edit in Inkscape, LibreOffice Draw, or drop straight into Google Slides.
 
 Three input formats are supported:
 
-| Format | Tool | Example |
-|--------|------|---------|
-| **[diagrams](https://diagrams.mingrammer.com/)** Python scripts | `diagram2svg.py` | `diagram2svg.py arch.py` |
-| **[Mermaid](https://mermaid.js.org/)** flowcharts (`.mmd`) | `mermaid2svg.py` | `mermaid2svg.py arch.mmd` |
-| **LDraw / LeoCAD** (`.ldr`) brick scenes | `ldr2svg` | `ldr2svg scene.ldr` |
+| Format | Command | Example |
+|--------|---------|---------|
+| **[diagrams](https://diagrams.mingrammer.com/)** Python scripts | `diagram2svg` | `uv run diagram2svg arch.py` |
+| **[Mermaid](https://mermaid.js.org/)** flowcharts (`.mmd`) | `mermaid2svg` | `uv run mermaid2svg arch.mmd` |
+| **LDraw / LeoCAD** (`.ldr`) brick scenes | `ldr2svg` | `uv run ldr2svg scene.ldr` |
 
 ### Example transformation
 
@@ -43,13 +43,13 @@ Three input formats are supported:
 ### diagrams-library script → SVG
 
 ```bash
-uv run python scripts/diagram2svg.py examples/arch.py -o arch_bricks.svg
+uv run diagram2svg arch.py -o arch_bricks.svg
 ```
 
 ### Mermaid flowchart → SVG
 
 ```bash
-uv run python scripts/mermaid2svg.py examples/arch.mmd -o arch_bricks.svg
+uv run mermaid2svg arch.mmd -o arch_bricks.svg
 ```
 
 ### LDraw scene → SVG
