@@ -10,7 +10,7 @@ Convert architecture diagrams and LDraw brick scenes into clean, **editable** is
 
 ## What it does
 
-ldr2svg turns diagrams into isometric LEGO brick illustrations.
+ldr2svg turns diagrams into isometric brick illustrations.
 Each node becomes a coloured 2×2 brick, clusters become raised platforms,
 and edges become arching arrows — all rendered as a single SVG you can
 edit in Inkscape, LibreOffice Draw, or drop straight into Google Slides.
@@ -108,8 +108,7 @@ xvfb-run uv run pytest test/ -v
 
 - **`ldr2svg/brick.scad`** — derived from [Thingiverse thing:5699](http://www.thingiverse.com/thing:5699),
   © 2015 Christopher Finke, MIT licence.
-  LEGO, the LEGO logo, the Brick, DUPLO, and MINDSTORMS are trademarks of the LEGO Group.
 
 - **LDraw** — part geometry and colour definitions follow the
-  [LDraw](https://www.ldraw.org/) open standard for LEGO CAD programs.
+  [LDraw](https://www.ldraw.org/) open standard for Brick CAD programs.
   LDraw™ is a trademark of the Estate of James Jessiman.
