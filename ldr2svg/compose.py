@@ -165,7 +165,7 @@ def _build_duotone_filters(
     maps input-R (= grey value of the white render) to output-R × r.
     """
     result = {}
-    for hex_color in hex_colors:
+    for hex_color in sorted(hex_colors):
         r = int(hex_color[1:3], 16) / 255
         g = int(hex_color[3:5], 16) / 255
         b = int(hex_color[5:7], 16) / 255
