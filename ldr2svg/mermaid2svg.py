@@ -19,14 +19,6 @@ def main() -> None:
     )
     parser.add_argument("-j", "--workers", type=int, default=None,
                         help="Parallel render workers (default: cpu count)")
-    parser.add_argument(
-        "--masked", action="store_true",
-        help=(
-            "Colourise at SVG composition time via feColorMatrix duotone filters "
-            "instead of PIL pre-colorisation. Stores one grayscale image per "
-            "unique shape; each colour is a separate SVG filter."
-        ),
-    )
     args = parser.parse_args()
 
     input_path  = Path(args.input).resolve()
@@ -40,7 +32,6 @@ def main() -> None:
         graph, output_path,
         keep_pngs=args.keep_pngs,
         workers=args.workers,
-        masked=args.masked,
     )
 
 

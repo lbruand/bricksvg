@@ -1,11 +1,8 @@
 """compose.py — SVG composition: projection, layout, and piece placement."""
 
 import io
-import re
 import base64
 import hashlib
-from pathlib import Path
-from typing import Callable
 
 import svgwrite
 import svgwrite.container
@@ -72,8 +69,8 @@ def _img_to_data_uri(img: Image.Image) -> str:
 def _draw_grid(
     dwg: svgwrite.Drawing,
     grid: tuple | None,
-    cx: Callable[[float], float],
-    cy: Callable[[float], float],
+    cx,
+    cy,
 ) -> None:
     """Draw the isometric floor grid if grid params are present."""
     if grid:
@@ -84,11 +81,6 @@ def _draw_grid(
 # ---------------------------------------------------------------------------
 # Piece label / projection
 # ---------------------------------------------------------------------------
-
-def _piece_label(piece: Piece) -> str:
-    """Human-readable cache-key label (includes colour)."""
-    return f"{piece.part} color={piece.color} rot={_fmt_rot_rows(piece)}"
-
 
 def _piece_label_no_color(piece: Piece) -> str:
     """Cache-key excluding colour — one render per part+rotation."""
@@ -101,24 +93,21 @@ def _project_piece(
     ih: int,
     anchor_x: float,
     anchor_y: float,
-    label_fn: Callable[[Piece], str] = _piece_label,
 ) -> tuple[float, float, float, float, float, float, int, int, str]:
     """Project one piece to a screen-space row: (depth, ldy, sx_px, sy_px, ax, ay, iw, ih, label)."""
     sx, sy, depth = project_ldraw(piece.pos)
     return (depth, float(piece.pos[1]), sx * PX_PER_MM, sy * PX_PER_MM,
-            anchor_x, anchor_y, iw, ih, label_fn(piece))
+            anchor_x, anchor_y, iw, ih, _piece_label_no_color(piece))
 
 
 def _project_pieces(
     pngs: list[tuple[Piece, int, int, float, float]],
-    label_fn: Callable[[Piece], str] = _piece_label,
 ) -> list[tuple[float, float, float, float, int, int, str]]:
     """Project each piece to screen coords and sort back-to-front.
 
     Returns (sx_px, sy_px, ax, ay, iw, ih, label) per piece.
     """
-    rows = sorted([_project_piece(*t, label_fn=label_fn) for t in pngs],
-                  key=lambda t: (-t[1], t[0]))
+    rows = sorted([_project_piece(*t) for t in pngs], key=lambda t: (-t[1], t[0]))
     return [(sx, sy, ax, ay, iw, ih, label)
             for _, _, sx, sy, ax, ay, iw, ih, label in rows]
 
@@ -147,37 +136,11 @@ def _canvas_bounds(
 # SVG <defs> builders
 # ---------------------------------------------------------------------------
 
-def _make_dwg_image(
-    label: str, img: Image.Image, anchor_x: float, anchor_y: float,
-    dwg: svgwrite.Drawing,
-) -> tuple[str, float, float, svgwrite.image.Image]:
-    """Encode img as a base64 PNG and return (def_id, ax, ay, dwg_image)."""
-    part_name = label.split()[0]
-    def_id    = f"{part_name}-{_hash_label(label)}"
-    iw, ih    = img.size
-    return def_id, anchor_x, anchor_y, dwg.image(
-        _img_to_data_uri(img), insert=("0px", "0px"),
-        size=(f"{iw}px", f"{ih}px"), id=def_id,
-    )
-
-
 def _build_defs(
     dwg: svgwrite.Drawing,
     renders: dict[str, tuple[Image.Image, float, float, list]],
-) -> dict[str, tuple[str, float, float]]:
-    """Add each unique piece image to <defs> once; return label→(def_id, ax, ay)."""
-    defs = {label: _make_dwg_image(label, img, anchor_x, anchor_y, dwg)
-            for label, (img, anchor_x, anchor_y, _pieces) in renders.items()}
-    for _, (_, _, _, dwg_image) in defs.items():
-        dwg.defs.add(dwg_image)
-    return {k: (def_id, ax, ay) for k, (def_id, ax, ay, _) in defs.items()}
-
-
-def _build_defs_masked(
-    dwg: svgwrite.Drawing,
-    renders: dict[str, tuple[Image.Image, float, float, list]],
 ) -> dict[str, tuple[str, float, float, int, int]]:
-    """Store each white render once in <defs>; return label → (img_id, ax, ay, iw, ih)."""
+    """Store each grayscale render once in <defs>; return label → (img_id, ax, ay, iw, ih)."""
     result = {}
     for label, (img, ax, ay, _pieces) in renders.items():
         iw, ih = img.size
@@ -219,14 +182,6 @@ def _build_duotone_filters(
     return result
 
 
-def _inject_def_comments(output: str, defs: dict[str, tuple]) -> None:
-    """Insert <!-- label --> before each <image element in <defs>."""
-    it = iter(defs.keys())
-    svg_text = Path(output).read_text()
-    svg_text = re.sub(r"(<image\b)", lambda m: f"<!-- {next(it)} -->\n      {m.group(1)}", svg_text)
-    Path(output).write_text(svg_text)
-
-
 # ---------------------------------------------------------------------------
 # Top-level compose
 # ---------------------------------------------------------------------------
@@ -235,17 +190,13 @@ def compose_svg(
     renders: dict[str, tuple[Image.Image, float, float, list[Piece]]],
     output: str,
     padding: int = 60,
-    masked: bool = False,
 ) -> None:
     pngs: list[tuple[Piece, int, int, float, float]] = [
         (piece, *img.size, ax, ay)
         for img, ax, ay, piece_list in renders.values()
         for piece in piece_list
     ]
-    if masked:
-        projected = _project_pieces(pngs, label_fn=_piece_label_no_color)
-    else:
-        projected = _project_pieces(pngs)
+    projected = _project_pieces(pngs)
 
     grid = _grid_params(renders)
     grid_corners = _grid_corner_sx_sy(*grid) if grid else []
@@ -259,39 +210,31 @@ def compose_svg(
     dwg.add(dwg.rect((0, 0), ("100%", "100%"), fill="#f8f8f0"))
     _draw_grid(dwg, grid, cx, cy)
 
-    if masked:
-        defs_m = _build_defs_masked(dwg, renders)
-        hex_colors = {
-            "#{:02x}{:02x}{:02x}".format(*ldraw_rgb(p.color))
-            for p, *_ in pngs
-        }
-        filters = _build_duotone_filters(dwg, hex_colors)
-        piece_proj = {
-            id(p): _project_piece(p, iw, ih, ax, ay, label_fn=_piece_label_no_color)
-            for p, iw, ih, ax, ay in pngs
-        }
-        lsx_to_piece: dict[tuple[str, float], Piece] = {
-            (row[8], row[2]): p
-            for p, *_ in pngs
-            for row in (piece_proj[id(p)],)
-        }
-        for sx_px, sy_px, _, _, _, _, label in projected:
-            piece = lsx_to_piece[(label, sx_px)]
-            img_id, dax, day, _, _ = defs_m[label]
-            hex_color = "#{:02x}{:02x}{:02x}".format(*ldraw_rgb(piece.color))
-            use_el = dwg.use(
-                f"#{img_id}",
-                insert=(f"{cx(sx_px) - dax:.1f}px", f"{cy(sy_px) - day:.1f}px"),
-            )
-            use_el.attribs["filter"] = f"url(#{filters[hex_color]})"
-            dwg.add(use_el)
-        dwg.save(pretty=True)
-    else:
-        defs = _build_defs(dwg, renders)
-        for sx_px, sy_px, _, _, _, _, label in projected:
-            def_id, ax, ay = defs[label]
-            dwg.add(dwg.use(f"#{def_id}", insert=(f"{cx(sx_px) - ax:.1f}px", f"{cy(sy_px) - ay:.1f}px")))
-        dwg.save(pretty=True)
-        _inject_def_comments(output, defs)
+    defs_m = _build_defs(dwg, renders)
+    hex_colors = {
+        "#{:02x}{:02x}{:02x}".format(*ldraw_rgb(p.color))
+        for p, *_ in pngs
+    }
+    filters = _build_duotone_filters(dwg, hex_colors)
+    piece_proj = {
+        id(p): _project_piece(p, iw, ih, ax, ay)
+        for p, iw, ih, ax, ay in pngs
+    }
+    lsx_to_piece: dict[tuple[str, float], Piece] = {
+        (row[8], row[2]): p
+        for p, *_ in pngs
+        for row in (piece_proj[id(p)],)
+    }
+    for sx_px, sy_px, _, _, _, _, label in projected:
+        piece = lsx_to_piece[(label, sx_px)]
+        img_id, dax, day, _, _ = defs_m[label]
+        hex_color = "#{:02x}{:02x}{:02x}".format(*ldraw_rgb(piece.color))
+        use_el = dwg.use(
+            f"#{img_id}",
+            insert=(f"{cx(sx_px) - dax:.1f}px", f"{cy(sy_px) - day:.1f}px"),
+        )
+        use_el.attribs["filter"] = f"url(#{filters[hex_color]})"
+        dwg.add(use_el)
+    dwg.save(pretty=True)
 
     print(f"Saved: {output}  ({W}×{H} px, {len(projected)} pieces)")

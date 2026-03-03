@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .diagram_bridge import build_ldr_scene
 from .diagram_compose import compose_diagram_svg
-from .ldr2png_svg import build_pngs_white, colorize_renders
+from .ldr2png_svg import build_pngs_white
 
 
 def run_lego_pipeline(
@@ -15,9 +15,8 @@ def run_lego_pipeline(
     *,
     keep_pngs: bool = False,
     workers: int | None = None,
-    masked: bool = False,
 ) -> None:
-    """Build pieces, render PNGs, colorise, and compose the isometric brick SVG.
+    """Build pieces, render PNGs, and compose the isometric brick SVG.
 
     Parameters
     ----------
@@ -30,8 +29,6 @@ def run_lego_pipeline(
         If True, leave intermediate PNG files in the temp directory.
     workers:
         Number of parallel OpenSCAD render workers (default: cpu count).
-    masked:
-        Use feColorMatrix duotone SVG filters instead of PIL pre-colorisation.
     """
     print("Building LDraw scene …")
     pieces, arrows, node_data, piece_groups, cluster_data = build_ldr_scene(graph)
@@ -44,20 +41,13 @@ def run_lego_pipeline(
     print(f"White-rendering pieces (tmpdir: {tmpdir}) …")
     white_renders = build_pngs_white(pieces, tmpdir, keep_pngs=keep_pngs, workers=workers)
 
-    if masked:
-        renders = white_renders
-    else:
-        print("Colorising renders with PIL …")
-        renders = colorize_renders(white_renders)
-
-    if not renders:
+    if not white_renders:
         print("No pieces rendered — nothing to compose.", file=sys.stderr)
         return
 
     compose_diagram_svg(
-        renders, output_path, arrows, node_data,
+        white_renders, output_path, arrows, node_data,
         piece_groups=piece_groups, cluster_data=cluster_data,
-        masked=masked,
     )
 
     if not keep_pngs:

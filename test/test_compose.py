@@ -9,30 +9,30 @@ from PIL import Image
 from ldr2svg.parts import parse_ldr, PART_MAP, Piece
 from ldr2svg.projection import project_ldraw
 from ldr2svg.compose import (
-    _piece_label, _piece_label_no_color,
+    _piece_label_no_color,
     _fmt_rot_rows, _hash_label, _img_to_data_uri,
     _project_piece, _project_pieces,
-    _canvas_bounds, _build_defs, _build_defs_masked,
-    _inject_def_comments, _make_dwg_image, compose_svg,
+    _canvas_bounds, _build_defs, _build_duotone_filters,
+    compose_svg,
 )
 
 LDR_PATH = Path(__file__).parent.parent / "test.ldr"
+
+
+def _make_white_renders():
+    """White renders: keyed by _piece_label_no_color (as build_pngs_white produces)."""
+    pieces = [p for p in parse_ldr(LDR_PATH) if p.part in PART_MAP]
+    return {
+        label: (Image.new("RGBA", (100, 80)), 50.0, 40.0,
+                [p for p in pieces if _piece_label_no_color(p) == label])
+        for label in dict.fromkeys(_piece_label_no_color(p) for p in pieces)
+    }
 
 
 def _make_pngs():
     """Minimal pngs list from test.ldr with synthetic image sizes."""
     pieces = parse_ldr(LDR_PATH)
     return [(p, 100, 80, 50.0, 40.0) for p in pieces if p.part in PART_MAP]
-
-
-def _make_renders():
-    """Unique renders dict from test.ldr with synthetic images (3 entries)."""
-    pieces = [p for p in parse_ldr(LDR_PATH) if p.part in PART_MAP]
-    return {
-        label: (Image.new("RGBA", (100, 80)), 50.0, 40.0,
-                [p for p in pieces if _piece_label(p) == label])
-        for label in dict.fromkeys(_piece_label(p) for p in pieces)
-    }
 
 
 def _projected_row(sx=0.0, sy=0.0, ax=0.0, ay=0.0, iw=100, ih=80, label="test"):
@@ -60,7 +60,7 @@ class TestProjectPiece:
     def test_label_field(self):
         piece = self._piece_at()
         row = _project_piece(piece, 100, 80, 0.0, 0.0)
-        assert row[8] == _piece_label(piece)
+        assert row[8] == _piece_label_no_color(piece)
 
     def test_anchor_passthrough(self):
         row = _project_piece(self._piece_at(), 100, 80, 12.5, 7.3)
@@ -102,91 +102,94 @@ class TestCanvasBounds:
 
 
 class TestBuildDefs:
-    def test_one_def_per_unique_render(self, tmp_path):
+    def _make_renders(self):
+        pieces = [
+            Piece(part="3003", color=1, pos=np.zeros(3), rot=np.eye(3)),
+            Piece(part="3666", color=4, pos=np.zeros(3), rot=np.eye(3)),
+        ]
+        return {
+            _piece_label_no_color(p): (Image.new("RGBA", (100, 80)), 50.0, 40.0, [p])
+            for p in pieces
+        }
+
+    def test_one_entry_per_label(self, tmp_path):
         dwg = svgwrite.Drawing(str(tmp_path / "t.svg"))
-        defs = _build_defs(dwg, _make_renders())
-        assert len(defs) == 3
+        renders = self._make_renders()
+        result = _build_defs(dwg, renders)
+        assert len(result) == len(renders)
 
-    def test_def_id_format(self, tmp_path):
+    def test_img_id_prefix(self, tmp_path):
         dwg = svgwrite.Drawing(str(tmp_path / "t.svg"))
-        defs = _build_defs(dwg, _make_renders())
-        for label, (def_id, _, _) in defs.items():
-            part = label.split()[0]
-            assert def_id.startswith(f"{part}-")
-            suffix = def_id[len(part) + 1:]
-            assert len(suffix) == 8
-            assert all(c in "0123456789abcdef" for c in suffix)
+        result = _build_defs(dwg, self._make_renders())
+        for img_id, *_ in result.values():
+            assert img_id.startswith("grayscale-")
 
-    def test_anchors_stored(self, tmp_path):
+    def test_tuple_length(self, tmp_path):
         dwg = svgwrite.Drawing(str(tmp_path / "t.svg"))
-        defs = _build_defs(dwg, _make_renders())
-        for _, (_, ax, ay) in defs.items():
-            assert isinstance(ax, float)
-            assert isinstance(ay, float)
+        result = _build_defs(dwg, self._make_renders())
+        for entry in result.values():
+            assert len(entry) == 5  # img_id, ax, ay, iw, ih
 
-
-class TestInjectDefComments:
-    def test_comments_inserted(self, tmp_path):
-        svg = tmp_path / "t.svg"
-        svg.write_text('<svg><defs><image id="a"/><image id="b"/></defs></svg>')
-        _inject_def_comments(str(svg), {"label-a": ("a", 0.0, 0.0), "label-b": ("b", 0.0, 0.0)})
-        result = svg.read_text()
-        assert "<!-- label-a -->" in result
-        assert "<!-- label-b -->" in result
-
-    def test_comments_in_order(self, tmp_path):
-        svg = tmp_path / "t.svg"
-        svg.write_text('<svg><image id="x"/><image id="y"/></svg>')
-        _inject_def_comments(str(svg), {"first": ("x", 0.0, 0.0), "second": ("y", 0.0, 0.0)})
-        result = svg.read_text()
-        assert result.index("<!-- first -->") < result.index("<!-- second -->")
-
-
-class TestMakeDwgImage:
-    def test_returns_tuple_of_four(self, tmp_path):
+    def test_image_size_stored(self, tmp_path):
         dwg = svgwrite.Drawing(str(tmp_path / "t.svg"))
-        result = _make_dwg_image("3003 color=4 rot=[[1,0,0]]", Image.new("RGBA", (100, 80)), 12.5, 7.3, dwg)
-        assert len(result) == 4
+        result = _build_defs(dwg, self._make_renders())
+        for _, _, _, iw, ih in result.values():
+            assert iw == 100
+            assert ih == 80
 
-    def test_def_id_starts_with_part_name(self, tmp_path):
-        dwg = svgwrite.Drawing(str(tmp_path / "t.svg"))
-        def_id, _, _, _ = _make_dwg_image("3666 color=1 rot=...", Image.new("RGBA", (50, 50)), 0, 0, dwg)
-        assert def_id.startswith("3666-")
 
-    def test_anchors_preserved(self, tmp_path):
+class TestBuildDuotoneFilters:
+    def test_one_filter_per_color(self, tmp_path):
         dwg = svgwrite.Drawing(str(tmp_path / "t.svg"))
-        _, ax, ay, _ = _make_dwg_image("3003 color=4 rot=...", Image.new("RGBA", (100, 80)), 12.5, 7.3, dwg)
-        assert ax == pytest.approx(12.5)
-        assert ay == pytest.approx(7.3)
+        colors = {"#ff0000", "#00ff00", "#0000ff"}
+        result = _build_duotone_filters(dwg, colors)
+        assert len(result) == 3
 
-    def test_def_id_has_hash_suffix(self, tmp_path):
+    def test_filter_id_format(self, tmp_path):
         dwg = svgwrite.Drawing(str(tmp_path / "t.svg"))
-        def_id, _, _, _ = _make_dwg_image("3003 color=4 rot=...", Image.new("RGBA", (10, 10)), 0, 0, dwg)
-        suffix = def_id.split("-", 1)[1]
-        assert len(suffix) == 8
-        assert all(c in "0123456789abcdef" for c in suffix)
+        result = _build_duotone_filters(dwg, {"#aabbcc"})
+        assert result["#aabbcc"] == "duotone-aabbcc"
+
+    def test_same_color_same_id(self, tmp_path):
+        dwg = svgwrite.Drawing(str(tmp_path / "t.svg"))
+        result = _build_duotone_filters(dwg, {"#112233", "#112233"})
+        assert len(result) == 1
 
 
 class TestComposeSvg:
     def test_creates_svg_file(self, tmp_path):
         out = str(tmp_path / "out.svg")
-        compose_svg(_make_renders(), out)
+        compose_svg(_make_white_renders(), out)
         assert Path(out).exists()
 
     def test_svg_contains_use_elements(self, tmp_path):
         out = str(tmp_path / "out.svg")
-        compose_svg(_make_renders(), out)
+        compose_svg(_make_white_renders(), out)
         assert "<use" in Path(out).read_text()
 
     def test_svg_has_defs(self, tmp_path):
         out = str(tmp_path / "out.svg")
-        compose_svg(_make_renders(), out)
+        compose_svg(_make_white_renders(), out)
         assert "<defs>" in Path(out).read_text()
 
-    def test_svg_contains_def_comments(self, tmp_path):
+    def test_svg_has_filter_elements(self, tmp_path):
         out = str(tmp_path / "out.svg")
-        compose_svg(_make_renders(), out)
-        assert "<!--" in Path(out).read_text()
+        compose_svg(_make_white_renders(), out)
+        assert "feColorMatrix" in Path(out).read_text()
+
+    def test_svg_has_duotone_filters(self, tmp_path):
+        out = str(tmp_path / "out.svg")
+        compose_svg(_make_white_renders(), out)
+        assert 'id="duotone-' in Path(out).read_text()
+
+    def test_svg_dimensions_positive(self, tmp_path):
+        import xml.etree.ElementTree as ET
+        out = str(tmp_path / "out.svg")
+        compose_svg(_make_white_renders(), out)
+        root = ET.parse(out).getroot()
+        w = int(root.attrib["width"].replace("px", ""))
+        h = int(root.attrib["height"].replace("px", ""))
+        assert w > 0 and h > 0
 
 
 class TestFmtRotRows:
@@ -251,84 +254,6 @@ class TestPieceLabelNoColor:
 
     def test_same_for_different_colors(self):
         assert _piece_label_no_color(self._piece(1)) == _piece_label_no_color(self._piece(4))
-
-    def test_differs_from_piece_label(self):
-        p = self._piece()
-        assert _piece_label(p) != _piece_label_no_color(p)
-
-
-class TestBuildDefsMasked:
-    def _make_white_renders(self):
-        pieces = [
-            Piece(part="3003", color=1, pos=np.zeros(3), rot=np.eye(3)),
-            Piece(part="3666", color=4, pos=np.zeros(3), rot=np.eye(3)),
-        ]
-        return {
-            _piece_label_no_color(p): (Image.new("RGBA", (100, 80)), 50.0, 40.0, [p])
-            for p in pieces
-        }
-
-    def test_one_entry_per_label(self, tmp_path):
-        dwg = svgwrite.Drawing(str(tmp_path / "t.svg"))
-        renders = self._make_white_renders()
-        result = _build_defs_masked(dwg, renders)
-        assert len(result) == len(renders)
-
-    def test_img_id_prefix(self, tmp_path):
-        dwg = svgwrite.Drawing(str(tmp_path / "t.svg"))
-        result = _build_defs_masked(dwg, self._make_white_renders())
-        for img_id, *_ in result.values():
-            assert img_id.startswith("grayscale-")
-
-    def test_tuple_length(self, tmp_path):
-        dwg = svgwrite.Drawing(str(tmp_path / "t.svg"))
-        result = _build_defs_masked(dwg, self._make_white_renders())
-        for entry in result.values():
-            assert len(entry) == 5  # img_id, ax, ay, iw, ih
-
-    def test_image_size_stored(self, tmp_path):
-        dwg = svgwrite.Drawing(str(tmp_path / "t.svg"))
-        result = _build_defs_masked(dwg, self._make_white_renders())
-        for _, _, _, iw, ih in result.values():
-            assert iw == 100
-            assert ih == 80
-
-
-def _make_white_renders():
-    """White renders: keyed by _piece_label_no_color (as build_pngs_white produces)."""
-    pieces = [p for p in parse_ldr(LDR_PATH) if p.part in PART_MAP]
-    return {
-        label: (Image.new("RGBA", (100, 80)), 50.0, 40.0,
-                [p for p in pieces if _piece_label_no_color(p) == label])
-        for label in dict.fromkeys(_piece_label_no_color(p) for p in pieces)
-    }
-
-
-class TestComposeSvgMasked:
-    def test_creates_svg_file(self, tmp_path):
-        out = str(tmp_path / "masked.svg")
-        compose_svg(_make_white_renders(), out, masked=True)
-        assert Path(out).exists()
-
-    def test_svg_has_filter_elements(self, tmp_path):
-        out = str(tmp_path / "masked.svg")
-        compose_svg(_make_white_renders(), out, masked=True)
-        assert "feColorMatrix" in Path(out).read_text()
-
-    def test_svg_has_duotone_filters(self, tmp_path):
-        """Masked mode uses duotone <filter> per color instead of <mask>."""
-        out = str(tmp_path / "masked.svg")
-        compose_svg(_make_white_renders(), out, masked=True)
-        assert 'id="duotone-' in Path(out).read_text()
-
-    def test_svg_dimensions_positive(self, tmp_path):
-        import xml.etree.ElementTree as ET
-        out = str(tmp_path / "masked.svg")
-        compose_svg(_make_white_renders(), out, masked=True)
-        root = ET.parse(out).getroot()
-        w = int(root.attrib["width"].replace("px", ""))
-        h = int(root.attrib["height"].replace("px", ""))
-        assert w > 0 and h > 0
 
 
 class TestZOrderSort:

@@ -8,8 +8,7 @@ from PIL import Image
 
 from .compose import (
     _project_pieces, _project_piece, _canvas_bounds,
-    _build_defs, _build_defs_masked, _build_duotone_filters,
-    _piece_label_no_color,
+    _build_defs, _build_duotone_filters,
     _img_to_data_uri, _draw_grid,
 )
 from .parts import Piece, ldraw_rgb
@@ -302,7 +301,6 @@ def compose_diagram_svg(
     piece_groups: list[tuple[str, list[Piece]]] | None = None,
     cluster_data: list[dict] | None = None,
     padding: int = 60,
-    masked: bool = False,
 ) -> None:
     """Compose the final isometric brick SVG.
 
@@ -314,25 +312,17 @@ def compose_diagram_svg(
     5. Isometric labels
     6. Arrows (on top of everything so they are always visible)
 
-    When *masked* is ``True``, pieces are rendered using a white base image
-    stored once per unique (part, rotation) in ``<defs>``.  Each instance is
-    composed as::
-
-        <use href="#white-…" filter="url(#duotone-rrggbb)"/>
-
-    A ``<filter>`` with ``feColorMatrix`` colourises the grey render: white →
-    brick colour, shadows darken proportionally (same maths as PIL multiply).
-    This avoids re-rendering the same geometry in multiple colours.
+    Each grayscale render is stored once per unique (part, rotation) in
+    ``<defs>``.  Colour is applied per instance via a ``<filter>`` with
+    ``feColorMatrix`` (duotone: white → brick colour, shadows darken
+    proportionally).
     """
     pngs: list[tuple[Piece, int, int, float, float]] = [
         (piece, *img.size, ax, ay)
         for img, ax, ay, piece_list in renders.values()
         for piece in piece_list
     ]
-    if masked:
-        projected = _project_pieces(pngs, label_fn=_piece_label_no_color)
-    else:
-        projected = _project_pieces(pngs)
+    projected = _project_pieces(pngs)
 
     grid = _grid_params(renders)
     grid_corners = _grid_corner_sx_sy(*grid) if grid else []
@@ -360,59 +350,31 @@ def compose_diagram_svg(
     _draw_grid(dwg, grid, cx, cy)
 
     # 3. Brick images in defs + placed instances (back-to-front, grouped by cluster)
-    if masked:
-        defs_m = _build_defs_masked(dwg, renders)
-        piece_proj = {
-            id(piece): _project_piece(piece, iw, ih, ax, ay,
-                                      label_fn=_piece_label_no_color)
-            for piece, iw, ih, ax, ay in pngs
-        }
-        piece_hex: dict[int, str] = {
-            id(piece): "#{:02x}{:02x}{:02x}".format(*ldraw_rgb(piece.color))
-            for piece, *_ in pngs
-        }
-        filters = _build_duotone_filters(dwg, set(piece_hex.values()))
-
-        def _place_masked(grp, piece: Piece, sx_px: float, sy_px: float, label: str) -> None:
-            img_id, dax, day, _, _ = defs_m[label]
-            use_el = dwg.use(
-                f"#{img_id}",
-                insert=(f"{cx(sx_px) - dax:.1f}px", f"{cy(sy_px) - day:.1f}px"),
-            )
-            use_el.attribs["filter"] = f"url(#{filters[piece_hex[id(piece)]]})"
-            grp.add(use_el)
-
-        defs: dict[str, tuple[str, float, float]] = {}  # not used in masked path
-    else:
-        defs = _build_defs(dwg, renders)
-        piece_proj = {
-            id(piece): _project_piece(piece, iw, ih, ax, ay)
-            for piece, iw, ih, ax, ay in pngs
-        }
+    defs_m = _build_defs(dwg, renders)
+    piece_proj = {
+        id(piece): _project_piece(piece, iw, ih, ax, ay)
+        for piece, iw, ih, ax, ay in pngs
+    }
+    piece_hex: dict[int, str] = {
+        id(piece): "#{:02x}{:02x}{:02x}".format(*ldraw_rgb(piece.color))
+        for piece, *_ in pngs
+    }
+    filters = _build_duotone_filters(dwg, set(piece_hex.values()))
 
     def _row_key(p: Piece) -> tuple:
         r = piece_proj[id(p)]
         return (-r[1], r[0])   # sort back-to-front: by -ldy then depth
 
     def _place_piece(grp, piece: Piece) -> None:
-        """Place one piece into *grp*, using masked or normal technique."""
         row = piece_proj[id(piece)]
         sx_px, sy_px, label = row[2], row[3], row[8]
-        if masked:
-            _place_masked(grp, piece, sx_px, sy_px, label)
-        else:
-            def_id, dax, day = defs[label]
-            grp.add(dwg.use(
-                f"#{def_id}",
-                insert=(f"{cx(sx_px) - dax:.1f}px", f"{cy(sy_px) - day:.1f}px"),
-            ))
-
-    def _use(sx_px: float, sy_px: float, label: str) -> None:
-        def_id, dax, day = defs[label]
-        dwg.add(dwg.use(
-            f"#{def_id}",
+        img_id, dax, day, _, _ = defs_m[label]
+        use_el = dwg.use(
+            f"#{img_id}",
             insert=(f"{cx(sx_px) - dax:.1f}px", f"{cy(sy_px) - day:.1f}px"),
-        ))
+        )
+        use_el.attribs["filter"] = f"url(#{filters[piece_hex[id(piece)]]})"
+        grp.add(use_el)
 
     if piece_groups is not None:
         # Pass 1: platform tiles (3024 / 3070b) per cluster — each cluster in its
@@ -446,20 +408,15 @@ def compose_diagram_svg(
                 _place_piece(grp, p)
             dwg.add(grp)
     else:
-        if masked:
-            # projected is sorted; map back to piece objects via piece_proj
-            pid_to_piece = {id(p): p for p, *_ in pngs}
-            for sx_px, sy_px, _, _, _, _, label in projected:
-                piece_obj = next(
-                    pid_to_piece[pid] for pid, row in piece_proj.items()
-                    if row[2] == sx_px and row[8] == label
-                )
-                grp = dwg.g()
-                _place_masked(grp, piece_obj, sx_px, sy_px, label)
-                dwg.add(grp)
-        else:
-            for sx_px, sy_px, _, _, _, _, label in projected:
-                _use(sx_px, sy_px, label)
+        pid_to_piece = {id(p): p for p, *_ in pngs}
+        for sx_px, sy_px, _, _, _, _, label in projected:
+            piece_obj = next(
+                pid_to_piece[pid] for pid, row in piece_proj.items()
+                if row[2] == sx_px and row[8] == label
+            )
+            grp = dwg.g()
+            _place_piece(grp, piece_obj)
+            dwg.add(grp)
 
     # 4. Icons on top faces
     _draw_icons(dwg, node_data, cx, cy)

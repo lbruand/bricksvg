@@ -8,7 +8,7 @@ import pytest
 import svgwrite
 from PIL import Image
 
-from ldr2svg.compose import _piece_label
+from ldr2svg.compose import _piece_label_no_color
 from ldr2svg.diagram_compose import (
     _proj_canvas,
     _arrow_polygon_3d,
@@ -53,10 +53,7 @@ def _minimal_renders():
         Piece(part="3003", color=4,  pos=np.array([80.0, -24.0,  0.0]), rot=np.eye(3)),
     ]
     img = Image.new("RGBA", (100, 80))
-    return {
-        _piece_label(p): (img, 50.0, 40.0, [p])
-        for p in pieces
-    }
+    return {_piece_label_no_color(pieces[0]): (img, 50.0, 40.0, pieces)}
 
 
 def _minimal_node_data(icon_path=None, label="test-node"):
@@ -480,8 +477,7 @@ def _make_piece_groups_with_platform(renders):
                            pos=np.array([0.0, 0.0, 0.0]), rot=np.eye(3))
     # Re-use the same image as the 3003 piece (same size) so _build_defs finds it.
     img = Image.new("RGBA", (100, 80))
-    from ldr2svg.compose import _piece_label
-    platform_label = _piece_label(platform_piece)
+    platform_label = _piece_label_no_color(platform_piece)
     renders[platform_label] = (img, 50.0, 40.0, [platform_piece])
     return [("cluster_test", [platform_piece] + all_pieces[:1]), ("lone", all_pieces[1:])]
 
