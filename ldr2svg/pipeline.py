@@ -31,7 +31,7 @@ def run_lego_pipeline(
     workers:
         Number of parallel OpenSCAD render workers (default: cpu count).
     masked:
-        Use alpha-mask SVG colorisation instead of PIL pre-colorisation.
+        Use feColorMatrix duotone SVG filters instead of PIL pre-colorisation.
     """
     print("Building LDraw scene …")
     pieces, arrows, node_data, piece_groups, cluster_data = build_ldr_scene(graph)

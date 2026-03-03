@@ -144,9 +144,9 @@ def main() -> None:
     parser.add_argument(
         "--masked", action="store_true",
         help=(
-            "Colourise at SVG composition time via alpha mask + "
-            "mix-blend-mode:multiply instead of PIL pre-colorisation "
-            "(browser/Inkscape only, not supported in LibreOffice)."
+            "Colourise at SVG composition time via feColorMatrix duotone filters "
+            "instead of PIL pre-colorisation. Stores one grayscale image per "
+            "unique shape; each colour is a separate SVG filter."
         ),
     )
     args = parser.parse_args()
