@@ -17,9 +17,29 @@ from .projection import project_ldraw, PX_PER_MM
 from .grid import _grid_params, _grid_corner_sx_sy, _draw_isometric_grid
 
 
-# svgwrite has no built-in Mask element; reuse Group with the right tag name.
-class _SvgMask(svgwrite.container.Group):
-    elementname = "mask"
+class _SvgEl(svgwrite.container.Group):
+    """Minimal wrapper to emit any SVG element tag, bypassing svgwrite's validator.
+
+    svgwrite validates attribute names and values both at assignment time
+    and at serialisation time.  For filter primitives (feColorMatrix etc.)
+    and other elements not in its allowlist this raises ValueError/TypeError.
+    Overriding ``get_xml`` lets us write the element directly to ElementTree
+    without going through the validator.
+    """
+    def __init__(self, tag: str, **attribs):
+        self.elementname = tag
+        super().__init__(id=attribs.pop("id", None))
+        self.attribs.update(attribs)
+
+    def get_xml(self):
+        import xml.etree.ElementTree as ET
+        xml_el = ET.Element(self.elementname)
+        for k, v in self.attribs.items():
+            if v is not None:
+                xml_el.set(k, str(v))
+        for child in self.elements:
+            xml_el.append(child.get_xml())
+        return xml_el
 
 
 # ---------------------------------------------------------------------------
@@ -47,41 +67,6 @@ def _img_to_data_uri(img: Image.Image) -> str:
     img.save(buf, format="PNG")
     return f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode()}"
 
-
-def _place_masked_piece(
-    dwg: svgwrite.Drawing,
-    parent,
-    shadow_id: str,
-    mask_id: str,
-    dax: float,
-    day: float,
-    iw: int,
-    ih: int,
-    sx_px: float,
-    sy_px: float,
-    hex_color: str,
-    cx: Callable[[float], float],
-    cy: Callable[[float], float],
-) -> None:
-    """Emit one masked piece instance into *parent*.
-
-    Renders as::
-
-        <g style="isolation: isolate" transform="translate(x,y)">
-          <rect fill="hex_color" mask="url(#alpha-…)"/>
-          <use href="#shadow-…" style="mix-blend-mode: multiply"/>
-        </g>
-    """
-    x = f"{cx(sx_px) - dax:.1f}"
-    y = f"{cy(sy_px) - day:.1f}"
-    grp = dwg.g(style="isolation: isolate", transform=f"translate({x},{y})")
-    rect = dwg.rect(insert=("0", "0"), size=(str(iw), str(ih)), fill=hex_color)
-    rect.attribs["mask"] = f"url(#{mask_id})"
-    grp.add(rect)
-    use_el = dwg.use(f"#{shadow_id}")
-    use_el.attribs["style"] = "mix-blend-mode: multiply"
-    grp.add(use_el)
-    parent.add(grp)
 
 
 def _draw_grid(
@@ -191,43 +176,46 @@ def _build_defs(
 def _build_defs_masked(
     dwg: svgwrite.Drawing,
     renders: dict[str, tuple[Image.Image, float, float, list]],
-) -> dict[str, tuple[str, str, float, float, int, int]]:
-    """For masked rendering: add shadow images + alpha masks to <defs>.
-
-    Each unique white render gets:
-    - An ``<image id="shadow-{sha}">`` element (the white render itself)
-    - A ``<mask id="alpha-{sha}">`` element whose content is the alpha channel
-      of the white render encoded as a greyscale PNG.
-
-    Returns label → (shadow_id, mask_id, ax, ay, iw, ih).
-    """
+) -> dict[str, tuple[str, float, float, int, int]]:
+    """Store each white render once in <defs>; return label → (img_id, ax, ay, iw, ih)."""
     result = {}
     for label, (img, ax, ay, _pieces) in renders.items():
         iw, ih = img.size
-        sha = _hash_label(label)
-
-        shadow_id = f"shadow-{sha}"
+        part_name = label.split()[0]
+        img_id = f"grayscale-{part_name}-{_hash_label(label)}"
         dwg.defs.add(dwg.image(
             _img_to_data_uri(img), insert=("0", "0"),
-            size=(str(iw), str(ih)), id=shadow_id,
+            size=(str(iw), str(ih)), id=img_id,
         ))
+        result[label] = (img_id, ax, ay, iw, ih)
+    return result
 
-        mask_id = f"alpha-{sha}"
-        alpha_ch = img.split()[3]          # PIL Image, mode='L'
-        mask_el = _SvgMask(id=mask_id)
-        mask_el["maskContentUnits"] = "userSpaceOnUse"
-        mask_el["maskUnits"] = "userSpaceOnUse"
-        mask_el["x"] = "0"
-        mask_el["y"] = "0"
-        mask_el["width"] = str(iw)
-        mask_el["height"] = str(ih)
-        mask_el.add(dwg.image(
-            _img_to_data_uri(alpha_ch.convert("RGBA")),
-            insert=("0", "0"), size=(str(iw), str(ih)),
+
+def _build_duotone_filters(
+    dwg: svgwrite.Drawing,
+    hex_colors: set[str],
+) -> dict[str, str]:
+    """Create one feColorMatrix filter per unique brick color; return hex → filter_id.
+
+    Replicates PIL ``ImageChops.multiply``: white pixels become the brick colour;
+    shadow pixels darken proportionally.  ``feColorMatrix`` row ``r 0 0 0 0``
+    maps input-R (= grey value of the white render) to output-R × r.
+    """
+    result = {}
+    for hex_color in hex_colors:
+        r = int(hex_color[1:3], 16) / 255
+        g = int(hex_color[3:5], 16) / 255
+        b = int(hex_color[5:7], 16) / 255
+        fid = f"duotone-{hex_color[1:]}"
+        filt = _SvgEl("filter", id=fid)
+        filt["color-interpolation-filters"] = "sRGB"
+        filt.add(_SvgEl(
+            "feColorMatrix",
+            type="matrix",
+            values=f"{r:.4f} 0 0 0 0  {g:.4f} 0 0 0 0  {b:.4f} 0 0 0 0  0 0 0 1 0",
         ))
-        dwg.defs.add(mask_el)
-
-        result[label] = (shadow_id, mask_id, ax, ay, iw, ih)
+        dwg.defs.add(filt)
+        result[hex_color] = fid
     return result
 
 
@@ -273,6 +261,11 @@ def compose_svg(
 
     if masked:
         defs_m = _build_defs_masked(dwg, renders)
+        hex_colors = {
+            "#{:02x}{:02x}{:02x}".format(*ldraw_rgb(p.color))
+            for p, *_ in pngs
+        }
+        filters = _build_duotone_filters(dwg, hex_colors)
         piece_proj = {
             id(p): _project_piece(p, iw, ih, ax, ay, label_fn=_piece_label_no_color)
             for p, iw, ih, ax, ay in pngs
@@ -284,10 +277,14 @@ def compose_svg(
         }
         for sx_px, sy_px, _, _, _, _, label in projected:
             piece = lsx_to_piece[(label, sx_px)]
-            shadow_id, mask_id, dax, day, iw, ih = defs_m[label]
-            r, g, b = ldraw_rgb(piece.color)
-            _place_masked_piece(dwg, dwg, shadow_id, mask_id, dax, day, iw, ih,
-                                sx_px, sy_px, f"#{r:02x}{g:02x}{b:02x}", cx, cy)
+            img_id, dax, day, _, _ = defs_m[label]
+            hex_color = "#{:02x}{:02x}{:02x}".format(*ldraw_rgb(piece.color))
+            use_el = dwg.use(
+                f"#{img_id}",
+                insert=(f"{cx(sx_px) - dax:.1f}px", f"{cy(sy_px) - day:.1f}px"),
+            )
+            use_el.attribs["filter"] = f"url(#{filters[hex_color]})"
+            dwg.add(use_el)
         dwg.save(pretty=True)
     else:
         defs = _build_defs(dwg, renders)

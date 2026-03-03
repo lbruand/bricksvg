@@ -8,9 +8,9 @@ from PIL import Image
 
 from .compose import (
     _project_pieces, _project_piece, _canvas_bounds,
-    _build_defs, _build_defs_masked,
+    _build_defs, _build_defs_masked, _build_duotone_filters,
     _piece_label_no_color,
-    _img_to_data_uri, _place_masked_piece, _draw_grid,
+    _img_to_data_uri, _draw_grid,
 )
 from .parts import Piece, ldraw_rgb
 from .projection import project_ldraw, PX_PER_MM
@@ -318,11 +318,10 @@ def compose_diagram_svg(
     stored once per unique (part, rotation) in ``<defs>``.  Each instance is
     composed as::
 
-        <g style="isolation: isolate" transform="translate(x,y)">
-          <rect fill="#color" mask="url(#alpha-…)"/>   <!-- coloured base -->
-          <use href="#shadow-…" style="mix-blend-mode: multiply"/>  <!-- shadows -->
-        </g>
+        <use href="#white-…" filter="url(#duotone-rrggbb)"/>
 
+    A ``<filter>`` with ``feColorMatrix`` colourises the grey render: white →
+    brick colour, shadows darken proportionally (same maths as PIL multiply).
     This avoids re-rendering the same geometry in multiple colours.
     """
     pngs: list[tuple[Piece, int, int, float, float]] = [
@@ -372,11 +371,16 @@ def compose_diagram_svg(
             id(piece): "#{:02x}{:02x}{:02x}".format(*ldraw_rgb(piece.color))
             for piece, *_ in pngs
         }
+        filters = _build_duotone_filters(dwg, set(piece_hex.values()))
 
         def _place_masked(grp, piece: Piece, sx_px: float, sy_px: float, label: str) -> None:
-            shadow_id, mask_id, dax, day, iw, ih = defs_m[label]
-            _place_masked_piece(dwg, grp, shadow_id, mask_id, dax, day, iw, ih,
-                                sx_px, sy_px, piece_hex[id(piece)], cx, cy)
+            img_id, dax, day, _, _ = defs_m[label]
+            use_el = dwg.use(
+                f"#{img_id}",
+                insert=(f"{cx(sx_px) - dax:.1f}px", f"{cy(sy_px) - day:.1f}px"),
+            )
+            use_el.attribs["filter"] = f"url(#{filters[piece_hex[id(piece)]]})"
+            grp.add(use_el)
 
         defs: dict[str, tuple[str, float, float]] = {}  # not used in masked path
     else:

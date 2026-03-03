@@ -274,28 +274,22 @@ class TestBuildDefsMasked:
         result = _build_defs_masked(dwg, renders)
         assert len(result) == len(renders)
 
-    def test_shadow_id_prefix(self, tmp_path):
+    def test_img_id_prefix(self, tmp_path):
         dwg = svgwrite.Drawing(str(tmp_path / "t.svg"))
         result = _build_defs_masked(dwg, self._make_white_renders())
-        for shadow_id, *_ in result.values():
-            assert shadow_id.startswith("shadow-")
-
-    def test_mask_id_prefix(self, tmp_path):
-        dwg = svgwrite.Drawing(str(tmp_path / "t.svg"))
-        result = _build_defs_masked(dwg, self._make_white_renders())
-        for _, mask_id, *_ in result.values():
-            assert mask_id.startswith("alpha-")
+        for img_id, *_ in result.values():
+            assert img_id.startswith("grayscale-")
 
     def test_tuple_length(self, tmp_path):
         dwg = svgwrite.Drawing(str(tmp_path / "t.svg"))
         result = _build_defs_masked(dwg, self._make_white_renders())
         for entry in result.values():
-            assert len(entry) == 6  # shadow_id, mask_id, ax, ay, iw, ih
+            assert len(entry) == 5  # img_id, ax, ay, iw, ih
 
     def test_image_size_stored(self, tmp_path):
         dwg = svgwrite.Drawing(str(tmp_path / "t.svg"))
         result = _build_defs_masked(dwg, self._make_white_renders())
-        for _, _, _, _, iw, ih in result.values():
+        for _, _, _, iw, ih in result.values():
             assert iw == 100
             assert ih == 80
 
@@ -316,16 +310,16 @@ class TestComposeSvgMasked:
         compose_svg(_make_white_renders(), out, masked=True)
         assert Path(out).exists()
 
-    def test_svg_has_mask_elements(self, tmp_path):
+    def test_svg_has_filter_elements(self, tmp_path):
         out = str(tmp_path / "masked.svg")
         compose_svg(_make_white_renders(), out, masked=True)
-        assert "<mask" in Path(out).read_text()
+        assert "feColorMatrix" in Path(out).read_text()
 
-    def test_svg_has_rect_elements(self, tmp_path):
-        """Masked mode uses <rect fill=color> instead of <use>."""
+    def test_svg_has_duotone_filters(self, tmp_path):
+        """Masked mode uses duotone <filter> per color instead of <mask>."""
         out = str(tmp_path / "masked.svg")
         compose_svg(_make_white_renders(), out, masked=True)
-        assert "<rect" in Path(out).read_text()
+        assert 'id="duotone-' in Path(out).read_text()
 
     def test_svg_dimensions_positive(self, tmp_path):
         import xml.etree.ElementTree as ET
