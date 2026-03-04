@@ -294,7 +294,7 @@ def _rasterize_text(
 @functools.lru_cache(maxsize=1)
 def _load_font():
     """Return a fonttools TTFont for the first available system font, or None."""
-    from fontTools.ttLib import TTFont  # type: ignore[import-untyped]
+    from fontTools.ttLib import TTFont
     for path in _FONT_CANDIDATES:
         if Path(path).exists():
             try:
@@ -332,7 +332,7 @@ def _text_to_ops_emu(
     Glyphs are horizontally centred on the transform origin
     (matching SVG ``text_anchor="middle"``).
     """
-    from fontTools.pens.recordingPen import RecordingPen  # type: ignore[import-untyped]
+    from fontTools.pens.recordingPen import RecordingPen
 
     font = _load_font()
     if font is None:
