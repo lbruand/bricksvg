@@ -4,28 +4,46 @@ Each SVG element type becomes a native PPTX object:
   - <use> brick elements  → coloured PNG (grayscale render + duotone filter applied in PIL)
   - <line> grid elements  → connector shapes
   - <polygon> arrows      → rasterised PNG on transparent canvas
-  - <text> labels         → affine-warped rasterised text (preserves isometric perspective)
+  - <text> labels         → DrawingML custom-geometry paths (cubic beziers from font outlines,
+                            affine-transformed to preserve isometric perspective); falls back
+                            to rasterised bitmap if no system font is found
   - <image> icons         → affine-warped PNG (preserves isometric top-face mapping)
 """
 
 import argparse
 import base64
+import functools
 import io
 import math
 import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from lxml import etree as _et  # type: ignore[import-untyped]
 from PIL import Image, ImageChops, ImageDraw, ImageFont
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_CONNECTOR_TYPE
 
 
-SVG_NS = "http://www.w3.org/2000/svg"
+SVG_NS   = "http://www.w3.org/2000/svg"
 XLINK_NS = "http://www.w3.org/1999/xlink"
 
 _PX_TO_EMU = 9525  # 914 400 EMU/inch ÷ 96 px/inch
+
+# DrawingML / PresentationML namespace strings used when building <p:sp> elements
+_A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+_P_NS = "http://schemas.openxmlformats.org/presentationml/2006/main"
+
+# System font search order (first existing file wins)
+_FONT_CANDIDATES = [
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf",
+    "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+    "/System/Library/Fonts/Helvetica.ttc",
+    "C:/Windows/Fonts/arial.ttf",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -257,7 +275,7 @@ def _rasterize_text(
     font_size: float,
     fill_rgb: tuple[int, int, int],
 ) -> Image.Image:
-    """Render *text* to a transparent RGBA image at the given font size."""
+    """Render *text* to a transparent RGBA image (fallback when no vector font found)."""
     font  = ImageFont.load_default(size=round(max(8, font_size)))
     probe = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
     bbox  = probe.textbbox((0, 0), text or " ", font=font)
@@ -269,6 +287,232 @@ def _rasterize_text(
     return img
 
 
+# ---------------------------------------------------------------------------
+# Vector text: font outlines → DrawingML custom-geometry paths
+# ---------------------------------------------------------------------------
+
+@functools.lru_cache(maxsize=1)
+def _load_font():
+    """Return a fonttools TTFont for the first available system font, or None."""
+    from fontTools.ttLib import TTFont  # type: ignore[import-untyped]
+    for path in _FONT_CANDIDATES:
+        if Path(path).exists():
+            try:
+                return TTFont(path)
+            except Exception:
+                continue
+    return None
+
+
+def _quad_to_cubic(
+    p0: tuple[float, float],
+    p1: tuple[float, float],
+    p2: tuple[float, float],
+) -> tuple[tuple[float, float], tuple[float, float], tuple[float, float]]:
+    """Convert a quadratic bezier (p0→p1→p2) to cubic control points."""
+    return (
+        (p0[0] + 2/3*(p1[0]-p0[0]), p0[1] + 2/3*(p1[1]-p0[1])),
+        (p2[0] + 2/3*(p1[0]-p2[0]), p2[1] + 2/3*(p1[1]-p2[1])),
+        p2,
+    )
+
+
+def _text_to_ops_emu(
+    text: str,
+    font_size: float,
+    a: float, b: float, c: float, d: float, e: float, f: float,
+) -> list | None:
+    """Convert *text* to DrawingML path operations in EMU with SVG affine applied.
+
+    Returns a list of ``(op, pts)`` tuples where *op* is one of
+    ``'moveTo'``, ``'lineTo'``, ``'curveTo'`` (cubic), ``'closePath'``;
+    *pts* is a list of ``(x_emu, y_emu)`` integers.
+    Returns ``None`` if no system font is available.
+
+    Glyphs are horizontally centred on the transform origin
+    (matching SVG ``text_anchor="middle"``).
+    """
+    from fontTools.pens.recordingPen import RecordingPen  # type: ignore[import-untyped]
+
+    font = _load_font()
+    if font is None:
+        return None
+
+    upm       = font["head"].unitsPerEm
+    scale     = font_size / upm          # font design units → pixels
+    glyph_set = font.getGlyphSet()
+    cmap      = font.getBestCmap() or {}
+
+    # Pass 1: resolve glyph names and accumulate advance widths for centering
+    char_glyphs: list[tuple] = []
+    x_cursor = 0.0
+    for ch in text:
+        gname = cmap.get(ord(ch))
+        if gname and gname in glyph_set:
+            g = glyph_set[gname]
+            char_glyphs.append((g, x_cursor))
+            x_cursor += g.width
+        else:
+            x_cursor += upm * 0.55          # fallback advance for missing glyphs
+
+    x_origin = -x_cursor / 2               # centre on the transform anchor
+
+    def to_px(fx: float, fy: float, x_off: float) -> tuple[float, float]:
+        """Font units (Y-up) → pixels (Y-down), shifted by glyph x_off and centring."""
+        return (fx + x_off + x_origin) * scale, -fy * scale
+
+    def transform_emu(px: float, py: float) -> tuple[int, int]:
+        """Apply SVG matrix and convert to EMU."""
+        return (round((a*px + c*py + e) * _PX_TO_EMU),
+                round((b*px + d*py + f) * _PX_TO_EMU))
+
+    all_ops: list = []
+    for g, x_off in char_glyphs:
+        pen = RecordingPen()
+        g.draw(pen)
+
+        current: tuple[float, float] = (0.0, 0.0)   # last on-curve point in pixels
+
+        for op_name, args in pen.value:
+            if op_name == "moveTo":
+                p = to_px(args[0][0], args[0][1], x_off)
+                all_ops.append(("moveTo", [transform_emu(*p)]))
+                current = p
+
+            elif op_name == "lineTo":
+                p = to_px(args[0][0], args[0][1], x_off)
+                all_ops.append(("lineTo", [transform_emu(*p)]))
+                current = p
+
+            elif op_name == "curveTo":
+                # Cubic bezier: 2 control points + endpoint
+                pts = [to_px(pt[0], pt[1], x_off) for pt in args]
+                all_ops.append(("curveTo", [transform_emu(*pt) for pt in pts]))
+                current = pts[-1]
+
+            elif op_name == "qCurveTo":
+                # TrueType quadratic: all but last are off-curve, last is on-curve.
+                # Multiple consecutive off-curves imply on-curves at their midpoints.
+                offs = [to_px(pt[0], pt[1], x_off) for pt in args[:-1]]
+                end  = to_px(args[-1][0], args[-1][1], x_off)
+                prev = current
+                for i, off in enumerate(offs):
+                    nxt = (
+                        ((offs[i][0] + offs[i+1][0]) / 2,
+                         (offs[i][1] + offs[i+1][1]) / 2)
+                        if i + 1 < len(offs) else end
+                    )
+                    c1, c2, ep = _quad_to_cubic(prev, off, nxt)
+                    all_ops.append(("curveTo", [transform_emu(*pt) for pt in (c1, c2, ep)]))
+                    prev = nxt
+                current = end
+
+            elif op_name in ("closePath", "endPath"):
+                all_ops.append(("closePath", []))
+
+    return all_ops
+
+
+def _build_text_sp(
+    ops_emu: list,
+    fill_rgb: tuple[int, int, int],
+) -> "_et._Element | None":
+    """Build a DrawingML ``<p:sp>`` with custom-geometry paths from *ops_emu*.
+
+    All path coordinates in *ops_emu* are absolute EMU values.  The shape
+    bounding box is computed from the point set; path coords inside the element
+    are relative to the shape's top-left corner.
+    """
+    all_pts = [pt for op, pts in ops_emu for pt in pts]
+    if not all_pts:
+        return None
+
+    x0 = min(p[0] for p in all_pts)
+    y0 = min(p[1] for p in all_pts)
+    x1 = max(p[0] for p in all_pts)
+    y1 = max(p[1] for p in all_pts)
+    cx = max(1, x1 - x0)
+    cy = max(1, y1 - y0)
+
+    def _a(tag: str) -> str: return f"{{{_A_NS}}}{tag}"
+    def _p(tag: str) -> str: return f"{{{_P_NS}}}{tag}"
+    def _pt(parent, x: int, y: int) -> None:
+        e = _et.SubElement(parent, _a("pt"))
+        e.set("x", str(x - x0))
+        e.set("y", str(y - y0))
+
+    sp = _et.Element(_p("sp"))
+
+    # Non-visual properties
+    nvSpPr  = _et.SubElement(sp, _p("nvSpPr"))
+    cNvPr   = _et.SubElement(nvSpPr, _p("cNvPr"))
+    cNvPr.set("id", "1")
+    cNvPr.set("name", "text")
+    cNvSpPr = _et.SubElement(nvSpPr, _p("cNvSpPr"))
+    _et.SubElement(cNvSpPr, _a("spLocks")).set("noGrp", "1")
+    _et.SubElement(nvSpPr, _p("nvPr"))
+
+    # Shape properties
+    spPr = _et.SubElement(sp, _p("spPr"))
+    xfrm = _et.SubElement(spPr, _a("xfrm"))
+    off  = _et.SubElement(xfrm, _a("off"))
+    off.set("x", str(x0))
+    off.set("y", str(y0))
+    ext  = _et.SubElement(xfrm, _a("ext"))
+    ext.set("cx", str(cx))
+    ext.set("cy", str(cy))
+
+    # Custom geometry
+    custGeom = _et.SubElement(spPr, _a("custGeom"))
+    for tag in ("avLst", "gdLst", "ahLst", "cxnLst"):
+        _et.SubElement(custGeom, _a(tag))
+    rect = _et.SubElement(custGeom, _a("rect"))
+    rect.set("l", "0")
+    rect.set("t", "0")
+    rect.set("r", str(cx))
+    rect.set("b", str(cy))
+
+    pathLst = _et.SubElement(custGeom, _a("pathLst"))
+    path_el = _et.SubElement(pathLst, _a("path"))
+    path_el.set("w", str(cx))
+    path_el.set("h", str(cy))
+
+    for op, pts in ops_emu:
+        if op == "moveTo":
+            _pt(_et.SubElement(path_el, _a("moveTo")), *pts[0])
+        elif op == "lineTo":
+            _pt(_et.SubElement(path_el, _a("lnTo")), *pts[0])
+        elif op == "curveTo":
+            cb = _et.SubElement(path_el, _a("cubicBezTo"))
+            for pt in pts:
+                _pt(cb, *pt)
+        elif op == "closePath":
+            _et.SubElement(path_el, _a("close"))
+
+    # Solid fill
+    srgb = _et.SubElement(_et.SubElement(spPr, _a("solidFill")), _a("srgbClr"))
+    srgb.set("val", "{:02x}{:02x}{:02x}".format(*fill_rgb))
+
+    # No outline stroke
+    _et.SubElement(_et.SubElement(spPr, _a("ln")), _a("noFill"))
+
+    return sp
+
+
+def _add_sp(slide, sp_el: "_et._Element") -> None:
+    """Append *sp_el* to the slide shape tree, assigning a unique shape ID."""
+    spTree = slide.shapes._spTree
+    cNvPr_tag = f"{{{_P_NS}}}cNvPr"
+    max_id = max(
+        (int(el.get("id", 0)) for el in spTree.iter(cNvPr_tag)),
+        default=0,
+    )
+    cNvPr = sp_el.find(f".//{cNvPr_tag}")
+    if cNvPr is not None:
+        cNvPr.set("id", str(max_id + 1))
+    spTree.append(sp_el)
+
+
 def _process_text(el: ET.Element, slide) -> None:
     a, b, c, d, e, f = _parse_matrix(el.get("transform", ""))
     text = el.text or ""
@@ -278,12 +522,20 @@ def _process_text(el: ET.Element, slide) -> None:
     except ValueError:
         fs = 14.0
     fill_rgb = _parse_hex_color(fill) if fill.startswith("#") else (0, 0, 0)
-    img      = _rasterize_text(text, fs, fill_rgb)
-    W, H     = img.size
-    # Centre the image on its anchor (SVG text_anchor="middle")
-    e_c = e - a * W / 2 - c * H / 2
-    f_c = f - b * W / 2 - d * H / 2
-    warped, wx, wy = _affine_warp(img, a, b, c, d, e_c, f_c)
+
+    ops = _text_to_ops_emu(text, fs, a, b, c, d, e, f)
+    if ops is not None:
+        sp = _build_text_sp(ops, fill_rgb)
+        if sp is not None:
+            _add_sp(slide, sp)
+            return
+
+    # Fallback: rasterise + affine-warp bitmap
+    img = _rasterize_text(text, fs, fill_rgb)
+    W, H = img.size
+    warped, wx, wy = _affine_warp(img, a, b, c, d,
+                                   e - a*W/2 - c*H/2,
+                                   f - b*W/2 - d*H/2)
     _add_picture(slide, warped, wx, wy)
 
 
