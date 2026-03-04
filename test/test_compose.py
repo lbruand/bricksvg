@@ -19,8 +19,8 @@ from ldr2svg.compose import (
 LDR_PATH = Path(__file__).parent.parent / "test.ldr"
 
 
-def _make_white_renders():
-    """White renders: keyed by _piece_label_no_color (as build_pngs_white produces)."""
+def _make_grayscale_renders():
+    """Grayscale renders: keyed by _piece_label_no_color (as build_pngs_grayscale produces)."""
     pieces = [p for p in parse_ldr(LDR_PATH) if p.part in PART_MAP]
     return {
         label: (Image.new("RGBA", (100, 80)), 50.0, 40.0,
@@ -159,33 +159,33 @@ class TestBuildDuotoneFilters:
 class TestComposeSvg:
     def test_creates_svg_file(self, tmp_path):
         out = str(tmp_path / "out.svg")
-        compose_svg(_make_white_renders(), out)
+        compose_svg(_make_grayscale_renders(), out)
         assert Path(out).exists()
 
     def test_svg_contains_use_elements(self, tmp_path):
         out = str(tmp_path / "out.svg")
-        compose_svg(_make_white_renders(), out)
+        compose_svg(_make_grayscale_renders(), out)
         assert "<use" in Path(out).read_text()
 
     def test_svg_has_defs(self, tmp_path):
         out = str(tmp_path / "out.svg")
-        compose_svg(_make_white_renders(), out)
+        compose_svg(_make_grayscale_renders(), out)
         assert "<defs>" in Path(out).read_text()
 
     def test_svg_has_filter_elements(self, tmp_path):
         out = str(tmp_path / "out.svg")
-        compose_svg(_make_white_renders(), out)
+        compose_svg(_make_grayscale_renders(), out)
         assert "feColorMatrix" in Path(out).read_text()
 
     def test_svg_has_duotone_filters(self, tmp_path):
         out = str(tmp_path / "out.svg")
-        compose_svg(_make_white_renders(), out)
+        compose_svg(_make_grayscale_renders(), out)
         assert 'id="duotone-' in Path(out).read_text()
 
     def test_svg_dimensions_positive(self, tmp_path):
         import xml.etree.ElementTree as ET
         out = str(tmp_path / "out.svg")
-        compose_svg(_make_white_renders(), out)
+        compose_svg(_make_grayscale_renders(), out)
         root = ET.parse(out).getroot()
         w = int(root.attrib["width"].replace("px", ""))
         h = int(root.attrib["height"].replace("px", ""))

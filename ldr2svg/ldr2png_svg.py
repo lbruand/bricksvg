@@ -15,40 +15,40 @@ from .scad import make_scad, render_piece, remove_and_crop
 from .compose import compose_svg, _piece_label_no_color
 
 
-def _render_one_white(
+def _render_one_grayscale(
     i: int,
     piece: Piece,
     n: int,
     tmpdir: Path,
     keep_pngs: bool,
 ) -> tuple[Image.Image, float, float] | None:
-    """Render one unique (part, rotation) in white; return (img, ax, ay) or None."""
+    """Render one unique (part, rotation) in grayscale; return (img, ax, ay) or None."""
     part = PART_MAP[piece.part]
     scad_src = make_scad(part, (255, 255, 255), piece.rot)
-    png_path = tmpdir / f"white_{i:03d}_{piece.part}.png"
+    png_path = tmpdir / f"grayscale_{i:03d}_{piece.part}.png"
     ok = render_piece(scad_src, png_path)
     if ok:
         img, ax, ay = remove_and_crop(png_path)
-        print(f"  [{i+1}/{n}] White-render {piece.part} … ok")
+        print(f"  [{i+1}/{n}] Grayscale-render {piece.part} … ok")
         if not keep_pngs:
             png_path.unlink(missing_ok=True)
         return img, ax, ay
-    print(f"  [{i+1}/{n}] White-render {piece.part} … FAILED — skipping")
+    print(f"  [{i+1}/{n}] Grayscale-render {piece.part} … FAILED — skipping")
     return None
 
 
-def build_pngs_white(
+def build_pngs_grayscale(
     pieces: list[Piece],
     tmpdir: Path,
     keep_pngs: bool = False,
     workers: int | None = None,
 ) -> dict[str, tuple[Image.Image, float, float, list[Piece]]]:
-    """Render each unique (part, rotation) once in white in parallel; return renders.
+    """Render each unique (part, rotation) once in grayscale in parallel; return renders.
 
     Deduplicates by part + rotation only — colour is ignored.  All pieces
     that share the same part+rotation are grouped under one label regardless
-    of their actual colour.  Use :func:`colorize_renders` afterwards to
-    produce per-colour images via fast PIL multiplication.
+    of their actual colour.  Colour is applied at SVG composition time via
+    ``feColorMatrix`` duotone filters.
 
     Returns ``label → (img, ax, ay, pieces)`` where *pieces* lists every
     scene piece with that part+rotation (potentially spanning multiple colours).
@@ -77,7 +77,7 @@ def build_pngs_white(
     max_workers = workers or os.cpu_count()
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_label = {
-            executor.submit(_render_one_white, label_idx, piece, n_unique, tmpdir, keep_pngs): label
+            executor.submit(_render_one_grayscale, label_idx, piece, n_unique, tmpdir, keep_pngs): label
             for label_idx, (label, (_, piece)) in enumerate(by_label.items())
         }
         results: dict[str, tuple[Image.Image, float, float] | None] = {
@@ -111,15 +111,15 @@ def main() -> None:
     print(f"Found {len(pieces)} pieces in {input_path}")
 
     tmpdir = Path(tempfile.mkdtemp(prefix="ldr2png_"))
-    print(f"White-rendering pieces (tmpdir: {tmpdir}) …")
+    print(f"Grayscale-rendering pieces (tmpdir: {tmpdir}) …")
 
-    white_renders = build_pngs_white(pieces, tmpdir,
+    grayscale_renders = build_pngs_grayscale(pieces, tmpdir,
                                      keep_pngs=args.keep_pngs, workers=args.workers)
-    if not white_renders:
+    if not grayscale_renders:
         print("No pieces rendered — nothing to compose.", file=sys.stderr)
         return
 
-    compose_svg(white_renders, output_path, padding=60)
+    compose_svg(grayscale_renders, output_path, padding=60)
 
     if not args.keep_pngs:
         tmpdir.rmdir()

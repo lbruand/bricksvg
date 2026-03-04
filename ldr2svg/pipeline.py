@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .diagram_bridge import build_ldr_scene
 from .diagram_compose import compose_diagram_svg
-from .ldr2png_svg import build_pngs_white
+from .ldr2png_svg import build_pngs_grayscale
 
 
 def run_lego_pipeline(
@@ -38,15 +38,15 @@ def run_lego_pipeline(
     )
 
     tmpdir = Path(tempfile.mkdtemp(prefix="lego_render_"))
-    print(f"White-rendering pieces (tmpdir: {tmpdir}) …")
-    white_renders = build_pngs_white(pieces, tmpdir, keep_pngs=keep_pngs, workers=workers)
+    print(f"Grayscale-rendering pieces (tmpdir: {tmpdir}) …")
+    grayscale_renders = build_pngs_grayscale(pieces, tmpdir, keep_pngs=keep_pngs, workers=workers)
 
-    if not white_renders:
+    if not grayscale_renders:
         print("No pieces rendered — nothing to compose.", file=sys.stderr)
         return
 
     compose_diagram_svg(
-        white_renders, output_path, arrows, node_data,
+        grayscale_renders, output_path, arrows, node_data,
         piece_groups=piece_groups, cluster_data=cluster_data,
     )
 
