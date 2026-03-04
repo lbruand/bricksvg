@@ -11,13 +11,15 @@ dependencies = [
     "diagrams>=0.25.1",
     "numpy>=2.2.6",
     "pillow>=12.1.1",
+    "python-pptx>=1.0.2",
     "svgwrite>=1.4.3",
 ]
 
 [project.scripts]
-ldr2svg    = "ldr2svg.ldr2png_svg:main"
+ldr2svg     = "ldr2svg.ldr2png_svg:main"
 diagram2svg = "ldr2svg.diagram2svg:main"
 mermaid2svg = "ldr2svg.mermaid2svg:main"
+svg2pptx    = "ldr2svg.svg2pptx:main"
 
 [tool.uv]
 package = true
