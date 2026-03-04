@@ -8,17 +8,17 @@
     <filter id="duotone-0055bf" color-interpolation-filters="sRGB">
       <feColorMatrix type="matrix" values="0.0000 0 0 0 0  0.3333 0 0 0 0  0.7490 0 0 0 0  0 0 0 1 0"/>
     </filter>
-    <filter id="duotone-c91a09" color-interpolation-filters="sRGB">
-      <feColorMatrix type="matrix" values="0.7882 0 0 0 0  0.1020 0 0 0 0  0.0353 0 0 0 0  0 0 0 1 0"/>
-    </filter>
     <filter id="duotone-257a3e" color-interpolation-filters="sRGB">
       <feColorMatrix type="matrix" values="0.1451 0 0 0 0  0.4784 0 0 0 0  0.2431 0 0 0 0  0 0 0 1 0"/>
     </filter>
-    <filter id="duotone-ffffff" color-interpolation-filters="sRGB">
-      <feColorMatrix type="matrix" values="1.0000 0 0 0 0  1.0000 0 0 0 0  1.0000 0 0 0 0  0 0 0 1 0"/>
+    <filter id="duotone-c91a09" color-interpolation-filters="sRGB">
+      <feColorMatrix type="matrix" values="0.7882 0 0 0 0  0.1020 0 0 0 0  0.0353 0 0 0 0  0 0 0 1 0"/>
     </filter>
     <filter id="duotone-fe8a18" color-interpolation-filters="sRGB">
       <feColorMatrix type="matrix" values="0.9961 0 0 0 0  0.5412 0 0 0 0  0.0941 0 0 0 0  0 0 0 1 0"/>
+    </filter>
+    <filter id="duotone-ffffff" color-interpolation-filters="sRGB">
+      <feColorMatrix type="matrix" values="1.0000 0 0 0 0  1.0000 0 0 0 0  1.0000 0 0 0 0  0 0 0 1 0"/>
     </filter>
   </defs>
   <rect fill="#f8f8f0" height="100%" width="100%" x="0" y="0"/>
